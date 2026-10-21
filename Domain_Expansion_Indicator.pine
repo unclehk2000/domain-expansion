@@ -1,0 +1,766 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Unclehk2000
+//@version=6
+indicator("Domain Expansion — London Range, Overnight ATR & CBDR Qualifier", "Domain Expansion", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+tz = "America/New_York"
+
+// ═══════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════
+var g_D = "View"
+themeI  = input.string("Auto", "Card theme", options = ["Auto", "Dark", "Light"], group = g_D, tooltip = "The London card and the recent-sessions table. Auto follows the chart background. Their text always follows this theme, so it stays readable whatever chart text colour you pick.", display = display.none)
+lblSize = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = g_D, display = display.none)
+txtColI = input.color(#000001, "Chart text colour", group = g_D, tooltip = "The labels on the chart. Left at the default it follows the chart background; pick any colour to override. The cards keep their own text colour.", display = display.none)
+dateFmt = input.string("HH:mm MM/dd", "Label date format", group = g_D, display = display.none)
+maxDays = input.int(10, "Days to keep", minval = 1, group = g_D, display = display.none)
+ageDays = input.int(5, "Fresh for first N trading days", minval = 1, group = g_D, display = display.none)
+ageMode = input.string("Fade", "Older days", options = ["Fade", "Grey", "Keep"], tooltip = "Fade: older days keep their tier colour, half as strong. Grey: older days turn grey. Keep: no change.", group = g_D, display = display.none)
+agedCol = input.color(color.gray, "Grey colour", group = g_D, display = display.none)
+
+var g_S = "Sessions (ET)"
+drSess  = input.session("0200-0230", "Domain range (forms)", group = g_S, display = display.none)
+exSess  = input.session("0230-0250", "Execution window", group = g_S, display = display.none)
+lonSess = input.session("0200-0500", "Domain → end of London", tooltip = "Every level starts at the domain range open and stops at the end of London (05:00 ET), each day on its own.", group = g_S, display = display.none)
+onSess  = input.session("1800-0230", "Overnight (for the ATR)", group = g_S, display = display.none)
+ftSess  = input.session("0500-0700", "Follow-through window", tooltip = "Some expansions finish after London. The follow-through label reads the close at the end of this window.", group = g_S, display = display.none)
+
+var g_A = "Asset"
+asset   = input.string("NQ", "Asset", options = ["NQ", "ES", "Custom"], tooltip = "Scales every % setting (volatile ATR, CBDR %, % needed) to the market's volatility. The SD settings (coil, CBDR in ranges, SD needed) are ratios and work unchanged on any market.\n\nNQ = 1.00 · ES = 0.75 (ES moves about 0.74× NQ in % terms, 2023–26). The % settings below are typed on the NQ scale.\n\nOther markets: Custom, with scale ≈ that market's typical overnight ATR % ÷ 0.60% (NQ's median, 2018–2026). Odds are hidden on Custom because they were only measured on NQ and ES.", group = g_A, display = display.none)
+cScale  = input.float(1.00, "Custom scale", minval = 0.05, step = 0.05, group = g_A, display = display.none)
+
+var g_Q = "Qualifier · checked at 02:30"
+atrLen  = input.int(5, "Overnights in the ATR", minval = 1, group = g_Q, display = display.none)
+useTR   = input.bool(true, "True range (include the gap from the 16:59 close)", group = g_Q, display = display.none)
+coilMax = input.float(0.20, "Coiled: domain range ÷ overnight ATR at or below", minval = 0.01, step = 0.01, tooltip = "Used when expansion is measured in SD. A domain range that is small next to recent overnight volatility is coiled, e.g. a 26-pt range with a 207-pt overnight ATR = 0.13.\n\nNQ 2018–24 / 2025–26, 2 SD past the range at the London extreme: coiled days 63% / 57%, other days 29% / 23%. The ATR level on its own barely moves these odds.", group = g_Q, display = display.none)
+atrBig  = input.float(1.00, "Volatile: overnight ATR at or above (% of price, NQ scale)", minval = 0.05, step = 0.05, tooltip = "Used when expansion is measured in %. Overnight ATR = average overnight (18:00 → 02:29) true range of the last N overnights, today's included, read from 15-minute data.\n\nNQ 2018–2026, 0.3% close past the range at 04:59, by ATR: under 0.60% ~10% · 0.60–0.80% ~18% · 0.80–1.00% ~23% · 1.00%+ ~32% (all days 17%). Coiling does not help this measure.", group = g_Q, display = display.none)
+cbSess  = input.session("1400-2000", "CBDR session", tooltip = "CBDR (Central Bank Dealers Range) = the high-low range from 14:00 ET to 20:00 ET: the prior afternoon into the evening, across the 17:00 break.", group = g_Q, display = display.none)
+cbMult  = input.float(5.0, "CBDR wide (SD measure): at or above N domain ranges", minval = 0.5, step = 0.5, tooltip = "Used when expansion is measured in SD. NQ 2018–24 / 2025–26, 2 SD past the range at the London extreme:\nBoth (coiled + CBDR): 59% / 65%\nCoiled only: 50% / 33%\nCBDR only: 37% / 30%\nNeither: 20% / 17%\n4 and 6 ranges give the same picture.", group = g_Q, display = display.none)
+cbPct   = input.float(0.80, "CBDR wide (% measure): at or above % of price, NQ scale", minval = 0.05, step = 0.05, tooltip = "Used when expansion is measured in %. NQ 2018–24 / 2025–26, 0.3% close past the range at 04:59:\nBoth (volatile + CBDR): 35% / 37%\nVolatile only: 9% / 3% (rare)\nCBDR only: 21% / 20%\nNeither: 8% / 5%", group = g_Q, display = display.none)
+colBoth = input.color(#ff6d00, "Both", inline = "qc", group = g_Q, display = display.none)
+colF1   = input.color(#ffb300, "Coiled / volatile only", inline = "qc", group = g_Q, display = display.none)
+colCB   = input.color(#00acc1, "CBDR only", inline = "qc2", group = g_Q, display = display.none)
+colN    = input.color(color.gray, "Neither", inline = "qc2", group = g_Q, display = display.none)
+byTier  = input.bool(true, "Colour every drawing by its tier", tooltip = "On: the range, its levels, the SD lines and every label take the day's tier colour (Both / coiled or volatile only / CBDR only / Neither). Off: the fixed colours below are used.", group = g_Q, display = display.none)
+
+var g_X2 = "What counts as an expansion"
+expMode = input.string("SD at the London extreme", "Measure", options = ["SD at the London extreme", "SD at the 04:59 close", "% at the 04:59 close"], tooltip = "SD = multiples of the domain range beyond its high or low. The London extreme is the furthest point price reaches past the range between 02:30 and 04:59.", group = g_X2, display = display.none)
+expSD   = input.float(2.0, "SD needed", minval = 0.25, step = 0.25, group = g_X2, display = display.none)
+expPct  = input.float(0.30, "% needed (NQ scale)", minval = 0.05, step = 0.05, group = g_X2, display = display.none)
+showExp = input.bool(true, "Draw the expansion line", inline = "e", group = g_X2, display = display.none)
+colExp  = input.color(color.new(#5e35b1, 30), "", inline = "e", group = g_X2, display = display.none)
+
+var g_R = "Domain range"
+colRng  = input.color(#5e35b1, "High / low", group = g_R, display = display.none)
+showMid = input.bool(true, "Midpoint", inline = "m", group = g_R, display = display.none)
+colMid  = input.color(color.new(#5e35b1, 40), "", inline = "m", group = g_R, display = display.none)
+showBox = input.bool(true, "Shade the range", inline = "b", group = g_R, display = display.none)
+colBox  = input.color(color.new(#5e35b1, 88), "", inline = "b", group = g_R, display = display.none)
+
+var g_P = "Pre-London dealing range"
+showPL   = input.bool(true, "Pre-London dealing range", inline = "pl", group = g_P, tooltip = "The high, low and CE (midpoint) of 00:00–00:59 ET, drawn from 00:00 to the London open, or to 05:00. The high and low dash once price trades through them.\n\nNQ + ES + RTY 1-minute 2018–26, 5,526 sessions, at 00:00–01:00:\nBefore London (01:00–01:59): high taken 56%, low 51%, at least one 90%.\nLondon (02:00–04:59): high 78%, low 73%, at least one 99.7%, both 52%.\nCE: London traded through it on 75% of sessions. When price sat outside the range at 02:00 (52% of sessions), London came back to the CE 64% of the time.\nSteady in 2018–24 and 2025–26 and on each symbol.\n\nThe domain range formed inside the pre-London range on 8% of sessions. On those days, when not coiled, 2 SD odds were 37% against 26% (p 0.01, same side in both periods and on each symbol; 2025–26 has only 41 such days). Coiled days showed no difference. Not part of the tier.", display = display.none)
+colPL    = input.color(#2962ff, "", inline = "pl", group = g_P, display = display.none)
+plSess   = input.session("0000-0100", "Forms", group = g_P, display = display.none)
+plTo     = input.string("02:00 · London open", "Lines run to", options = ["02:00 · London open", "05:00 · end of London"], group = g_P, display = display.none)
+showPLce = input.bool(true, "CE (midpoint)", group = g_P, display = display.none)
+
+var g_X = "Standard deviations (domain range multiples)"
+sdMode  = input.string("Always", "Draw", options = ["Always", "Both factors only", "At least one factor"], tooltip = "k SD = k domain ranges beyond the domain high (+) and low (−), drawn on both sides from 02:00 to 05:00.\n\nOn days that closed London 0.3% beyond the range (NQ 2018–2026) the move topped out at a median 3.1–3.2 SD (middle half 2.2–4.5). Reached: 2 SD ~83%, 2.5 SD ~68%, 3 SD ~56%, 4 SD ~30%, 5 SD ~16%.", group = g_X, display = display.none)
+sd10    = input.bool(false, "1.0", inline = "s1", group = g_X, display = display.none)
+sd15    = input.bool(false, "1.5", inline = "s1", group = g_X, display = display.none)
+sd20    = input.bool(true, "2.0", inline = "s1", group = g_X, display = display.none)
+sd25    = input.bool(true, "2.5", inline = "s1", group = g_X, display = display.none)
+sd30    = input.bool(true, "3.0", inline = "s2", group = g_X, display = display.none)
+sd40    = input.bool(true, "4.0", inline = "s2", group = g_X, display = display.none)
+sd50    = input.bool(false, "5.0", inline = "s2", group = g_X, display = display.none)
+colSD   = input.color(color.new(#5e35b1, 45), "SD colour", group = g_X, display = display.none)
+showSDc = input.bool(true, "Custom SDs", inline = "sc", group = g_X, display = display.none)
+sdTxt   = input.string("", "", inline = "sc", group = g_X, tooltip = "Your own multiples, separated by commas, e.g. 3.5, 6\nEach one is drawn above the high and below the low. Up to 10; anything already ticked is skipped.", display = display.none)
+colSDc  = input.color(color.new(#00897b, 30), "Custom colour", inline = "sc2", group = g_X, display = display.none)
+sdSty   = input.string("Dotted", "", options = ["Dotted", "Dashed", "Solid"], inline = "sc2", group = g_X, display = display.none)
+
+var g_E = "Execution & result"
+showWin = input.bool(true, "Shade the execution window", group = g_E, display = display.none)
+showBrk = input.bool(true, "Mark the first break in the window", tooltip = "A label on the candle that first broke the domain range inside the execution window, e.g. ▲ Break 02:33.", group = g_E, display = display.none)
+showNotes = input.bool(true, "Text notes on the chart", tooltip = "Two notes a day: the tier at 02:30, and the result at 05:00 with the follow-through added at the end of its window. The tier note moves to the side away from the first break; the 05:00 note goes on the other side, beyond the London high or low and to the left of 05:00. That keeps them off each other, off the breakout label and off the line labels that start at 05:00. The London card shows the same.", group = g_E, display = display.none)
+showUK  = input.bool(true, "Mark the 08:00 UK open", inline = "uk", tooltip = "London and Frankfurt cash open: 03:00 ET most of the year, 04:00 ET in the weeks US and UK clocks are out of step.", group = g_E, display = display.none)
+colUK   = input.color(color.new(color.gray, 30), "", inline = "uk", group = g_E, display = display.none)
+
+var g_C = "London card"
+showCard = input.bool(true, "London card", inline = "lc", group = g_C, tooltip = "02:00 to 17:00 ET. Live from 02:30: the domain range and today's tier, the expected London range and how much of it is done, the furthest SD so far, the live odds of 2 SD by 04:59, and how often the London high and low were already in at this point. After 05:00: the London result and the London high and low into New York.\n\nOdds: NQ + ES + RTY 1-minute 2018–26, 6,135 London sessions, steady in 2018–24 and 2025–26 and on each symbol. They are shown at the default settings they were measured on (domain 02:00–02:30, London to 05:00, 2 SD at the London extreme, coiled at 0.20, ATR of 5 overnights with true range) and hidden otherwise.", display = display.none)
+cardPos  = input.string("Top right", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "lc", group = g_C, display = display.none)
+cardSzI  = input.string("Small", "Card text", options = ["Tiny", "Small", "Normal"], group = g_C, display = display.none)
+showHist = input.bool(true, "Recent London sessions", inline = "rh", group = g_C, tooltip = "One row per London session, newest first: tier, the result at 05:00, the furthest SD past the domain range (▲ above, ▼ below) and the London range (02:00–04:59) in points. Built from the chart's own history, so a 1-minute chart lists the days it has loaded.", display = display.none)
+histPos  = input.string("Bottom right", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "rh", group = g_C, display = display.none)
+histN    = input.int(10, "last", minval = 3, maxval = 30, inline = "rh", group = g_C, display = display.none)
+
+var g_N = "London → New York"
+showCarry = input.bool(true, "Carry the London high / low to 11:00 ET", group = g_N, tooltip = "The London high and low (02:00–04:59) drawn from 05:00 to 11:00 ET, each marked when it is taken.\n\nNQ + ES + RTY 2018–26: NY AM (09:30–10:59) took the London high on 66% of sessions and the low on 62%. By 11:00 (from 05:00): 75% and 71%. At least one of the two 99%, both 48%. Steady in 2018–24 and 2025–26 and on each symbol.", display = display.none)
+
+var g_AL = "Alerts · one alert on \"Any alert() function call\" covers these"
+alDR  = input.bool(true, "Domain range set (02:30), with the tier", group = g_AL, display = display.none)
+alBrk = input.bool(true, "First break in the execution window", group = g_AL, display = display.none)
+alExp = input.bool(true, "Expansion line reached", group = g_AL, display = display.none)
+alRes = input.bool(true, "London result (05:00)", group = g_AL, display = display.none)
+alNY  = input.bool(true, "London high / low taken before 11:00", group = g_AL, display = display.none)
+
+// Theme: Auto follows the chart background; colours left at their default (#000001) follow it
+bgLum  = 0.299 * color.r(chart.bg_color) + 0.587 * color.g(chart.bg_color) + 0.114 * color.b(chart.bg_color)
+isDark = themeI == "Dark" or (themeI == "Auto" and bgLum < 128)                      // the cards
+autoC(color c) => color.r(c) == 0 and color.g(c) == 0 and color.b(c) == 1
+txtCol = autoC(txtColI) ? (bgLum < 128 ? #d1d4dc : #131722) : txtColI              // labels on the chart
+cTxt   = isDark ? #d1d4dc : #131722                                                // card text, from the card theme only
+lumOf(color c) => 0.299 * color.r(c) + 0.587 * color.g(c) + 0.114 * color.b(c)
+hdrTx(color c) => lumOf(c) > 165 ? #131722 : #ffffff                                // dark text on light tier colours
+
+
+if not timeframe.isintraday or timeframe.in_seconds() > 15 * 60
+    runtime.error("Use an intraday chart of 15 minutes or less (1 min recommended).")
+
+tSize = lblSize == "Tiny" ? size.tiny : lblSize == "Normal" ? size.normal : size.small
+cSz   = cardSzI == "Tiny" ? size.tiny : cardSzI == "Normal" ? size.normal : size.small
+cBody = isDark ? #161a23 : #f4f6f9
+cSub  = isDark ? #8a93a6 : #5d6476
+posOf(string p) =>
+    switch p
+        "Top left"      => position.top_left
+        "Top center"    => position.top_center
+        "Top right"     => position.top_right
+        "Middle left"   => position.middle_left
+        "Middle right"  => position.middle_right
+        "Bottom left"   => position.bottom_left
+        "Bottom center" => position.bottom_center
+        => position.bottom_right
+gauge(float f) =>
+    int k = int(math.round(math.max(0.0, math.min(1.0, f)) * 8))
+    str.repeat("█", k) + str.repeat("░", 8 - k)
+pctI(float v) => na(v) ? "—" : str.tostring(math.round(v)) + "%"
+stampOf(int t) => str.format_time(t, dateFmt, tz)
+hhmm(int t) => str.format_time(t, "HH:mm", tz)
+pctTxt(float v) => str.tostring(v, "#.##") + "%"
+sdTxtOf(float v) => str.tostring(v, "0.0#") + " SD"
+sdStyle = sdSty == "Dashed" ? line.style_dashed : sdSty == "Solid" ? line.style_solid : line.style_dotted
+modeSD  = expMode != "% at the 04:59 close"
+scale   = asset == "ES" ? 0.75 : asset == "Custom" ? cScale : 1.0
+atrBigE = atrBig * scale     // effective thresholds on this market
+cbPctE  = cbPct * scale
+expPctE = expPct * scale
+
+// custom SDs: commas, spaces or semicolons; signs ignored (each multiple is drawn on both sides)
+parseSD(string txt) =>
+    clean = str.replace_all(str.replace_all(str.replace_all(str.replace_all(txt, "−", ""), "-", ""), ";", ","), " ", ",")
+    parts = str.split(clean, ",")
+    out = array.new<float>()
+    for part in parts
+        v = str.tonumber(part)
+        if not na(v) and v > 0 and out.size() < 10 and not out.includes(v)
+            out.push(v)
+    out
+var array<float> sdCust = parseSD(sdTxt)
+var array<float> sdPre  = array.from(1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0)
+sdTicked(float k) =>
+    (sd10 and k == 1.0) or (sd15 and k == 1.5) or (sd20 and k == 2.0) or (sd25 and k == 2.5) or (sd30 and k == 3.0) or (sd40 and k == 4.0) or (sd50 and k == 5.0)
+
+// London card tables: NQ + ES + RTY 1-minute 2018–26, 6,135 sessions, split by coiled (domain range ÷ overnight ATR(5)
+// at or below 0.20) or not. Rows = checkpoints 02:30, 02:45 … 04:45 ET, read between rows by time.
+// LV: % that reached 2 SD past the domain range by 04:59, by the furthest SD so far (<0.5, 0.5–1, 1–1.5, 1.5–2).
+// IN: % whose London high (or low) was already in, by price's distance from it in domain ranges (<0.25, 0.25–0.5,
+// 0.5–1, 1–2, 2+). Highs and lows pooled (they read alike).
+parsePct(string s) =>
+    out = array.new<float>()
+    for x in str.split(s, ",")
+        out.push(str.tonumber(x))
+    out
+var array<float> LVO = parsePct("27,27,27,27,24,47,62,62,21,39,55,80,12,28,43,73,7,20,35,59,5,12,28,53,4,8,20,45,2,4,14,36,1,2,8,23,0,1,2,12")
+var array<float> LVC = parsePct("58,58,58,58,54,70,75,75,48,64,75,86,32,48,64,79,19,39,54,70,16,29,40,64,13,22,31,54,4,13,19,39,0,4,9,30,0,2,2,14")
+var array<float> INO = parsePct("8,19,41,60,60,10,20,40,57,59,12,23,41,60,77,11,29,47,67,83,14,31,52,73,90,17,35,57,79,92,18,38,61,84,95,20,45,71,89,99,23,55,79,95,99,35,69,92,99,100")
+var array<float> INC = parsePct("7,16,27,29,29,7,17,28,47,57,8,20,29,49,72,8,18,36,55,75,8,22,36,61,83,9,20,42,65,86,12,28,46,69,90,12,34,52,78,95,14,44,61,87,98,25,55,81,95,100")
+tblAt(array<float> a, int ncol, float pos, int col) =>
+    float p  = math.max(0.0, math.min(9.0, pos))
+    int   i0 = int(math.floor(p))
+    int   i1 = math.min(9, i0 + 1)
+    float f  = p - i0
+    a.get(i0 * ncol + col) * (1 - f) + a.get(i1 * ncol + col) * f
+
+// ═══════════════════════════════════════════════════════════════════
+// SESSIONS & TRADING DAY (18:00 ET start)
+// ═══════════════════════════════════════════════════════════════════
+sessOn(string s) => not na(time(timeframe.period, s, tz))
+inDR  = sessOn(drSess)
+inEx  = sessOn(exSess)
+inLon = sessOn(lonSess)
+inFT  = sessOn(ftSess)
+inUK8 = not na(time(timeframe.period, "0800-0900", "Europe/London"))
+to05  = plTo == "05:00 · end of London"
+inPL  = sessOn(plSess)
+inPLd = sessOn(str.substring(plSess, 0, 4) + (to05 ? "-0500" : "-0200"))   // the lines run from the range open to 02:00 or 05:00
+drStart  = inDR and not inDR[1]
+drEnd    = not inDR and inDR[1]
+lonEnd   = not inLon and inLon[1]
+ftEnd    = not inFT and inFT[1]
+dayStart = ta.change(time_tradingday) != 0   // new CME trading day (the 18:00 ET bar)
+ukStart  = inUK8 and not inUK8[1]
+
+var int dayCount = 0
+if dayStart
+    dayCount += 1
+
+// ═══════════════════════════════════════════════════════════════════
+// DRAWING STORE
+// ═══════════════════════════════════════════════════════════════════
+type Lv
+    line   ln
+    label  lb
+    box    bx
+    float  y
+    bool   above
+    int    day
+    bool   hit
+    bool   live
+    bool   watch     // dash it when price trades through after it forms
+    string grp       // "dr" = runs to the end of London; anything else is fixed
+    color  col = na  // its own colour (line, or box fill), used when it ages
+
+var array<Lv>    store = array.new<Lv>()
+var array<label> evLbl = array.new<label>()
+var array<int>   evDay = array.new<int>()
+var array<color> evCol = array.new<color>()
+
+mkLv(int t0, float y, color col, int w, string st, string txt, bool above, bool watch) =>
+    lv = Lv.new(line.new(t0, y, time, y, xloc = xloc.bar_time, color = col, style = st, width = w), label.new(time, y, txt, xloc = xloc.bar_time, style = label.style_label_left, color = #ffffff00, textcolor = txtCol, size = tSize), na, y, above, dayCount, false, true, watch, "dr", col)
+    store.push(lv)
+    lv
+
+mkEvent(float y, string txt, color col, string st) =>
+    lb = label.new(time, y, txt, xloc = xloc.bar_time, style = st, color = color.new(col, 80), textcolor = txtCol, size = tSize)
+    evLbl.push(lb)
+    evDay.push(dayCount)
+    evCol.push(col)
+    lb
+
+mkPL(int t0, float y, color col, string st, string txt, bool above, bool watch, string tip) =>
+    lv = Lv.new(line.new(t0, y, time, y, xloc = xloc.bar_time, color = col, style = st, width = 1), label.new(time, y, txt, xloc = xloc.bar_time, style = label.style_label_left, color = #ffffff00, textcolor = txtCol, size = tSize, tooltip = tip), na, y, above, dayCount, false, true, watch, "pre", col)
+    store.push(lv)
+
+// a label's text moves above or below its line when another level sits close, so lines and labels that meet at the same time stay legible
+awayFrom(Lv a, float y) =>
+    a.lb.set_style(a.y > y or (a.y == y and (a.grp == "pre" ? not a.above : a.above)) ? label.style_label_lower_left : label.style_label_upper_left)
+
+// half as strong: transparency moves halfway to fully clear
+fade(color c) => color.new(c, color.t(c) + (100 - color.t(c)) * 0.5)
+
+if dayStart
+    while store.size() > 0 and store.get(0).day <= dayCount - maxDays
+        lv = store.shift()
+        if not na(lv.ln)
+            lv.ln.delete()
+        if not na(lv.bx)
+            lv.bx.delete()
+        lv.lb.delete()
+    while evDay.size() > 0 and evDay.get(0) <= dayCount - maxDays
+        evLbl.shift().delete()
+        evDay.shift()
+        evCol.shift()
+    // age the day that has just turned N trading days old (once, not on every bar)
+    if ageMode != "Keep"
+        nA = store.size()
+        if nA > 0
+            for i = 0 to nA - 1
+                lv = store.get(i)
+                if dayCount - lv.day == ageDays
+                    if ageMode == "Grey"
+                        if not na(lv.ln)
+                            lv.ln.set_color(agedCol)
+                        if not na(lv.bx)
+                            lv.bx.set_bgcolor(color.new(agedCol, 88))
+                        lv.lb.set_textcolor(agedCol)
+                    else
+                        if not na(lv.ln)
+                            lv.ln.set_color(fade(lv.col))
+                        if not na(lv.bx)
+                            lv.bx.set_bgcolor(fade(lv.col))
+                        lv.lb.set_textcolor(fade(txtCol))
+        nB = evLbl.size()
+        if nB > 0
+            for i = 0 to nB - 1
+                if dayCount - evDay.get(i) == ageDays
+                    evLbl.get(i).set_color(ageMode == "Grey" ? color.new(agedCol, 85) : color.new(evCol.get(i), 90))
+                    evLbl.get(i).set_textcolor(ageMode == "Grey" ? agedCol : fade(txtCol))
+
+// ═══════════════════════════════════════════════════════════════════
+// OVERNIGHT ATR: average overnight (18:00 → 02:29) true range of the last N overnights, today's included
+// ═══════════════════════════════════════════════════════════════════
+// Computed on 15-minute data so it is ready from the first day on the chart (1-minute history is short).
+// The value is updated on the first 15-minute bar after the overnight ends and uses only the bars before it,
+// so reading it with lookahead on does not see the future.
+nightCtx() =>
+    var float pc = na
+    var float oh = na
+    var float ol = na
+    var array<float> tp = array.new<float>()
+    var array<float> tq = array.new<float>()
+    var float ap = na
+    var float aq = na
+    inO = not na(time(timeframe.period, onSess, tz))
+    if ta.change(time_tradingday) != 0
+        pc := close[1]
+    if inO and not inO[1]
+        oh := high
+        ol := low
+    else if inO
+        oh := math.max(oh, high)
+        ol := math.min(ol, low)
+    if not inO and inO[1] and not na(oh)
+        hi = useTR and not na(pc) ? math.max(oh, pc) : oh
+        lo = useTR and not na(pc) ? math.min(ol, pc) : ol
+        tp.push(100 * (hi - lo) / close[1])
+        tq.push(hi - lo)
+        while tp.size() > atrLen
+            tp.shift()
+            tq.shift()
+        ap := tp.size() >= atrLen ? tp.avg() : na
+        aq := tq.size() >= atrLen ? tq.avg() : na
+    // CBDR 14:00 → 20:00 ET, finalised on the first 15-minute bar after it ends (same no-lookahead logic as the ATR)
+    var float ch = na
+    var float cl = na
+    var float cv = na
+    inC = not na(time(timeframe.period, cbSess, tz))
+    if inC and not inC[1]
+        ch := high
+        cl := low
+    else if inC
+        ch := math.max(ch, high)
+        cl := math.min(cl, low)
+    if not inC and inC[1] and not na(ch)
+        cv := ch - cl
+    [ap, aq, cv]
+[atrPct, atrPts, cbPts] = request.security(syminfo.tickerid, "15", nightCtx(), lookahead = barmerge.lookahead_on)
+// ADR20 of the trading day from daily bars (the CME 18:00–17:00 day), for the London summary
+float adrD = request.security(ticker.modify(syminfo.tickerid, backadjustment = backadjustment.off), "D", ta.sma(high - low, 20)[1], lookahead = barmerge.lookahead_on)
+
+// ═══════════════════════════════════════════════════════════════════
+// PRE-LONDON DEALING RANGE (00:00 → 01:00), lines to 02:00 or 05:00
+// ═══════════════════════════════════════════════════════════════════
+var float pH  = na
+var float pL  = na
+var int   pHt = na
+var int   pLt = na
+var int   pT0 = na
+var int   pDay = na     // the trading day whose pre-London range is in pH / pL
+if inPL and not inPL[1]
+    pH  := high
+    pL  := low
+    pHt := time
+    pLt := time
+    pT0 := time
+else if inPL
+    if high > pH
+        pH  := high
+        pHt := time
+    if low < pL
+        pL  := low
+        pLt := time
+if not inPL and inPL[1] and not na(pH) and pH > pL
+    pDay := dayCount
+plClr() => showPL and not to05 and pDay == dayCount    // pre-London labels sit at 02:00 today
+if showPL and not inPL and inPL[1] and inPLd and not na(pH) and pH > pL
+    string rngTx = "Pre-London dealing range " + hhmm(pT0) + "–" + hhmm(time) + " ET, " + str.tostring(math.round(pH - pL)) + " pts. "
+    mkPL(pT0, pH, colPL, line.style_solid, "Pre-London high", true, true, rngTx + "High " + str.tostring(pH, format.mintick) + " at " + stampOf(pHt) + ". London (02:00–04:59) took it on 78% of sessions, NQ + ES + RTY 2018–26.")
+    mkPL(pT0, pL, colPL, line.style_solid, "Pre-London low", false, true, rngTx + "Low " + str.tostring(pL, format.mintick) + " at " + stampOf(pLt) + ". London (02:00–04:59) took it on 73% of sessions, NQ + ES + RTY 2018–26.")
+    if showPLce
+        mkPL(pT0, (pH + pL) / 2, color.new(colPL, 30), line.style_dotted, "Pre-London CE", true, false, rngTx + "CE (midpoint) " + str.tostring((pH + pL) / 2, format.mintick) + ". London traded through it on 75% of sessions; 64% when price sat outside the range at 02:00.")
+
+// ═══════════════════════════════════════════════════════════════════
+// DOMAIN RANGE (02:00 → 02:30), levels 02:00 → 05:00
+// ═══════════════════════════════════════════════════════════════════
+var float dH  = na
+var float dL  = na
+var int   dHt = na
+var int   dLt = na
+var int   dT0 = na
+if drStart
+    dH  := high
+    dL  := low
+    dHt := time
+    dLt := time
+    dT0 := time
+else if inDR
+    if high > dH
+        dH  := high
+        dHt := time
+    if low < dL
+        dL  := low
+        dLt := time
+
+var bool  qual    = false   // factor 1: coiled (SD measure) or volatile (% measure)
+var bool  qualV   = false
+var bool  qualC   = false
+var bool  cbOK    = false   // factor 2: CBDR wide
+var int   tier    = 0       // 3 both · 2 factor 1 only · 1 CBDR only · 0 neither
+var string oddsT  = ""
+var float rD      = na
+var float coil    = na
+var float xUp     = na
+var float xDn     = na
+var bool  brkDone = true
+var int   dDay    = na
+var float lonHi   = na
+var float lonLo   = na
+var bool  expHit  = true    // the expansion line reached today
+var int   expT    = na
+var string ftRes  = na      // the follow-through close against the range, for the card
+var label  tierLb = na      // today's notes: the tier (02:30) and the result (05:00)
+var label  resLb  = na
+var bool   tierUp = true    // the tier note sits above the domain range (false: below)
+var int   lonDay  = na      // the trading day whose London has finished (05:00)
+var float lH5     = na      // the London high / low at 05:00
+var float lL5     = na
+var int   nyHt    = na      // when New York took them
+var int   nyLt    = na
+var int   resV    = 0       // 05:00 result: 1 up · −1 down · 0 none
+var float resSD   = na      // the furthest SD past the range, signed by side
+if drEnd and not na(dH) and dH > dL
+    dDay    := dayCount
+    rD      := dH - dL
+    coil    := na(atrPts) ? na : rD / atrPts
+    qualC   := not na(coil) and coil <= coilMax
+    qualV   := not na(atrPct) and atrPct >= atrBigE
+    qual    := modeSD ? qualC : qualV
+    cbV     = na(cbPts) ? na : 100 * cbPts / close[1]
+    cbR     = na(cbPts) ? na : cbPts / rD
+    cbOK    := modeSD ? (not na(cbR) and cbR >= cbMult) : (not na(cbV) and cbV >= cbPctE)
+    tier    := qual and cbOK ? 3 : qual ? 2 : cbOK ? 1 : 0
+    // historical odds by tier at the default yardsticks (NQ 2018–2026, ES 2023–2026): 2 SD at the London extreme, 0.3% (NQ scale) close at 04:59
+    oddsT   := asset == "ES" ? (modeSD ? (tier == 3 ? "~58%" : tier == 2 ? "~34%" : tier == 1 ? "~38%" : "~18%") : (tier == 3 ? "~43%" : tier == 2 ? "~8%" : tier == 1 ? "~17%" : "~7%")) : (modeSD ? (tier == 3 ? "~60%" : tier == 2 ? "~40%" : tier == 1 ? "~35%" : "~20%") : (tier == 3 ? "~35%" : tier == 2 ? "~5%" : tier == 1 ? "~21%" : "~8%"))
+    xUp     := modeSD ? dH + expSD * rD : dH * (1 + expPctE / 100)
+    xDn     := modeSD ? dL - expSD * rD : dL * (1 - expPctE / 100)
+    brkDone := false
+    lonHi   := high
+    lonLo   := low
+    expHit  := false
+    expT    := na
+    ftRes   := na
+    tierLb  := na
+    resLb   := na
+    tierUp  := true
+    // the day's colours: the tier colour, or the fixed colours when "Colour every drawing by its tier" is off
+    tc   = tier == 3 ? colBoth : tier == 2 ? colF1 : tier == 1 ? colCB : colN
+    cRng = byTier ? tc : colRng
+    cMid = byTier ? color.new(tc, 40) : colMid
+    cBox = byTier ? color.new(tc, 88) : colBox
+    cExp = byTier ? color.new(tc, 30) : colExp
+    cSD  = byTier ? color.new(tc, 45) : colSD
+    cSDc = byTier ? color.new(tc, 30) : colSDc
+    if showBox
+        store.push(Lv.new(na, label.new(dT0, dH, "", xloc = xloc.bar_time, style = label.style_none), box.new(dT0, dH, time, dL, xloc = xloc.bar_time, bgcolor = cBox, border_color = color.new(cBox, 100)), dH, true, dayCount, false, false, false, "box", cBox))
+    mkLv(dT0, dH, cRng, 1, line.style_solid, stampOf(dHt) + " Domain high", true, true)
+    mkLv(dT0, dL, cRng, 1, line.style_solid, stampOf(dLt) + " Domain low", false, true)
+    if showMid
+        mkLv(dT0, (dH + dL) / 2, cMid, 1, line.style_dotted, stampOf(dT0) + " Domain 0.5", true, false)
+    sdOn = sdMode == "Always" or (sdMode == "Both factors only" and tier == 3) or (sdMode == "At least one factor" and tier >= 1)
+    // the expansion line, unless an SD line already sits on it
+    expOnSD = modeSD and sdOn and (sdTicked(expSD) or (showSDc and sdCust.includes(expSD)))
+    if showExp and not expOnSD
+        expLbl = modeSD ? sdTxtOf(expSD) : pctTxt(expPctE)
+        mkLv(dT0, xUp, cExp, 1, line.style_solid, "+" + expLbl + " · expansion", true, true)
+        mkLv(dT0, xDn, cExp, 1, line.style_solid, "−" + expLbl + " · expansion", false, true)
+    if sdOn
+        for k in sdPre
+            if sdTicked(k)
+                tag = modeSD and k == expSD ? " · expansion" : ""
+                mkLv(dT0, dH + k * rD, cSD, 1, line.style_dotted, "+" + sdTxtOf(k) + tag, true, true)
+                mkLv(dT0, dL - k * rD, cSD, 1, line.style_dotted, "−" + sdTxtOf(k) + tag, false, true)
+        if showSDc and sdCust.size() > 0
+            for k in sdCust
+                if not sdTicked(k)
+                    tag = modeSD and k == expSD ? " · expansion" : ""
+                    mkLv(dT0, dH + k * rD, cSDc, 1, sdStyle, "+" + sdTxtOf(k) + tag, true, true)
+                    mkLv(dT0, dL - k * rD, cSDc, 1, sdStyle, "−" + sdTxtOf(k) + tag, false, true)
+    f1Name  = modeSD ? "coiled" : "volatile"
+    verdict = tier == 3 ? "◆◆ Domain Expansion: BOTH" : tier == 2 ? "◆ Domain Expansion: " + f1Name + " only" : tier == 1 ? "◆ Domain Expansion: CBDR only" : "◇ Domain Expansion: NEITHER"
+    // odds are only shown at the yardsticks they were measured on
+    oddsOn  = asset != "Custom" and ((expMode == "SD at the London extreme" and expSD == 2.0) or (expMode == "% at the 04:59 close" and expPct == 0.30))
+    oddsTxt = oddsOn ? " · " + (modeSD ? "2 SD odds " : pctTxt(expPctE) + " odds ") + oddsT : ""
+    coilTxt = na(coil) ? "Coil n/a" : "Coil " + str.tostring(coil, "0.00") + " (" + str.tostring(math.round(rD)) + " ÷ " + str.tostring(math.round(atrPts)) + " pts)" + (modeSD ? (qualC ? " ✓" : " ✗") : "")
+    atrTxt  = na(atrPct) ? "Overnight ATR warming up" : "Overnight ATR(" + str.tostring(atrLen) + ") " + pctTxt(atrPct) + (modeSD ? "" : (qualV ? " ✓" : " ✗"))
+    cbTxt   = na(cbPts) ? "CBDR n/a" : "CBDR " + str.tostring(math.round(cbPts)) + " pts · " + (modeSD ? str.tostring(cbR, "0.0") + " ranges" : pctTxt(cbV)) + (cbOK ? " ✓" : " ✗")
+    f1Txt   = modeSD ? coilTxt : atrTxt
+    if showNotes
+        tierLb := mkEvent(plClr() ? math.max(dH, pH) : dH, verdict + oddsTxt + "\n" + f1Txt + "\n" + cbTxt, tc, label.style_label_down)
+    if alDR
+        alert(syminfo.ticker + " · Domain range set " + str.tostring(math.round(rD)) + " pts (" + str.tostring(dH, format.mintick) + " / " + str.tostring(dL, format.mintick) + ") · " + str.replace(verdict, "◆◆ ", "") + oddsTxt, alert.freq_once_per_bar)
+    // the pre-London labels at 02:00 sit where the domain lines start: keep their text off those lines
+    if showPL and not to05 and store.size() > 0
+        int nP = store.size()
+        for i = 0 to nP - 1
+            a = store.get(i)
+            if a.day == dayCount and a.grp == "pre"
+                float best = na
+                float bd   = 0.25 * rD
+                for j = 0 to nP - 1
+                    b = store.get(j)
+                    if b.day == dayCount and b.grp == "dr" and math.abs(b.y - a.y) <= bd
+                        bd   := math.abs(b.y - a.y)
+                        best := b.y
+                if not na(best)
+                    awayFrom(a, best)
+
+qCol = tier == 3 ? colBoth : tier == 2 ? colF1 : tier == 1 ? colCB : colN
+
+// London extremes after the range (02:30 → 04:59)
+if inLon and not inDR and dDay == dayCount and not drEnd
+    lonHi := math.max(lonHi, high)
+    lonLo := math.min(lonLo, low)
+
+// execution window
+bgcolor(showWin and inEx and dDay == dayCount ? color.new(qCol, 88) : na, title = "Execution window")
+
+// first break of the domain range inside the execution window
+if inEx and not brkDone and dDay == dayCount and (high > dH or low < dL)
+    brkDone := true
+    string bTx = high > dH and low < dL ? "Both sides " : high > dH ? "▲ Break " : "▼ Break "
+    bool bUp = high > dH
+    if showBrk
+        mkEvent(bUp ? high : low, bTx + hhmm(time), qCol, bUp ? label.style_label_down : label.style_label_up)
+    if bUp
+        tierUp := false
+        if not na(tierLb)
+            tierLb.set_y(plClr() ? math.min(dL, pL) : dL)
+            tierLb.set_style(label.style_label_up)
+    if alBrk
+        alert(syminfo.ticker + " · Domain Expansion · " + bTx + hhmm(time) + " ET of the domain range", alert.freq_once_per_bar)
+
+// the expansion line reached (the line drawn at the SD or % needed, above or below)
+if inLon and not inDR and dDay == dayCount and not expHit and not na(xUp) and (high >= xUp or low <= xDn)
+    expHit := true
+    expT   := time
+    if alExp
+        alert(syminfo.ticker + " · Domain Expansion · " + (high >= xUp ? "▲ " : "▼ ") + (modeSD ? sdTxtOf(expSD) : pctTxt(expPctE)) + " expansion line reached " + hhmm(time) + " ET", alert.freq_once_per_bar)
+
+// distance past the domain range: SD and %, positive above the high, negative below the low
+pastSD(float p) => p > dH ? (p - dH) / rD : p < dL ? -(dL - p) / rD : 0.0
+pastPct(float p) => p > dH ? 100 * (p - dH) / dH : p < dL ? -100 * (dL - p) / dL : 0.0
+farTxt(float p) =>
+    s = pastSD(p)
+    s == 0 ? "inside the range" : sdTxtOf(math.abs(s)) + " (" + pctTxt(math.abs(pastPct(p))) + ")" + (s > 0 ? " above" : " below")
+
+// recent London sessions (newest last)
+var array<int>   hK = array.new<int>()
+var array<int>   hT = array.new<int>()
+var array<int>   hR = array.new<int>()
+var array<float> hS = array.new<float>()
+var array<float> hP = array.new<float>()
+
+// result at the end of London
+if lonEnd and dDay == dayCount and not na(rD)
+    c5    = close[1]
+    upX   = (lonHi - dH) / rD
+    dnX   = (dL - lonLo) / rD
+    isUp  = expMode == "SD at the London extreme" ? (upX >= expSD and upX >= dnX) : c5 >= xUp
+    isDn  = expMode == "SD at the London extreme" ? (dnX >= expSD and dnX > upX) : c5 <= xDn
+    exTxt = math.max(upX, dnX) <= 0 ? "stayed inside the range" : upX >= dnX ? "extreme " + sdTxtOf(upX) + " above" : "extreme " + sdTxtOf(dnX) + " below"
+    head  = isUp ? "✓ Domain Expansion ▲" : isDn ? "✓ Domain Expansion ▼" : "✗ No expansion"
+    lonDay := dayCount
+    lH5    := math.max(dH, lonHi)
+    lL5    := math.min(dL, lonLo)
+    nyHt   := na
+    nyLt   := na
+    resV   := isUp ? 1 : isDn ? -1 : 0
+    resSD  := upX >= dnX ? math.max(upX, 0.0) : -dnX
+    float lr = lH5 - lL5
+    string adrTx = na(adrD) or adrD <= 0 ? "" : " · " + str.tostring(lr / adrD, "0.00") + " ADR"
+    if showNotes
+        resLb := mkEvent(tierUp ? lL5 : lH5, head + "\n" + exTxt + " · close " + farTxt(c5) + "\nLondon " + str.tostring(math.round(lr)) + " pts" + adrTx, qCol, tierUp ? label.style_label_upper_right : label.style_label_lower_right)
+    // labels that meet at 05:00 (domain, SD and pre-London levels, and the carried London high / low) keep their text off each other
+    int n5 = store.size()
+    for i = 0 to n5 - 1
+        a = store.get(i)
+        if a.day == dayCount and (a.grp == "dr" or (a.grp == "pre" and to05))
+            float best = na
+            float bd   = 0.25 * rD
+            for j = 0 to n5 - 1
+                b = store.get(j)
+                if j != i and b.day == dayCount and (b.grp == "dr" or (b.grp == "pre" and to05)) and math.abs(b.y - a.y) <= bd
+                    bd   := math.abs(b.y - a.y)
+                    best := b.y
+            if showCarry
+                if math.abs(lH5 - a.y) <= bd
+                    bd   := math.abs(lH5 - a.y)
+                    best := lH5
+                if math.abs(lL5 - a.y) <= bd
+                    best := lL5
+            if not na(best)
+                awayFrom(a, best)
+    if alRes
+        alert(syminfo.ticker + " · London 05:00 · " + head + " · " + exTxt + " · range " + str.tostring(math.round(lr)) + " pts" + adrTx, alert.freq_once_per_bar)
+    hK.push(time_tradingday)
+    hT.push(tier)
+    hR.push(resV)
+    hS.push(resSD)
+    hP.push(lr)
+    if hK.size() > 30
+        hK.shift()
+        hT.shift()
+        hR.shift()
+        hS.shift()
+        hP.shift()
+    // the London high and low, carried to 11:00
+    if showCarry
+        color cc = byTier ? qCol : colRng
+        lvH = Lv.new(line.new(time, lH5, time, lH5, xloc = xloc.bar_time, color = cc, style = line.style_solid, width = 2), label.new(time, lH5, "London high · NY AM 66% · by 11:00 75%", xloc = xloc.bar_time, style = label.style_label_left, color = #ffffff00, textcolor = txtCol, size = tSize, tooltip = "London high (02:00–04:59). NQ + ES + RTY 2018–26: NY AM (09:30–10:59) took it on 66% of sessions; by 11:00, 75%."), na, lH5, true, dayCount, false, true, true, "ny", cc)
+        lvL = Lv.new(line.new(time, lL5, time, lL5, xloc = xloc.bar_time, color = cc, style = line.style_solid, width = 2), label.new(time, lL5, "London low · NY AM 62% · by 11:00 71%", xloc = xloc.bar_time, style = label.style_label_left, color = #ffffff00, textcolor = txtCol, size = tSize, tooltip = "London low (02:00–04:59). NQ + ES + RTY 2018–26: NY AM (09:30–10:59) took it on 62% of sessions; by 11:00, 71%."), na, lL5, false, dayCount, false, true, true, "ny", cc)
+        store.push(lvH)
+        store.push(lvL)
+
+// follow-through after London
+if ftEnd and dDay == dayCount and not na(rD)
+    c7 = close[1]
+    float s7 = pastSD(c7)
+    ftRes := s7 == 0 ? "close inside the range" : "close " + sdTxtOf(math.abs(s7)) + (s7 > 0 ? " above" : " below")
+    if showNotes and not na(resLb)
+        resLb.set_text(resLb.get_text() + "\nFollow-through " + hhmm(time) + " · close " + farTxt(c7))
+
+// 08:00 UK open
+if showUK and ukStart
+    store.push(Lv.new(line.new(time, low, time, high + syminfo.mintick, xloc = xloc.bar_time, extend = extend.both, color = colUK, style = line.style_dotted), label.new(time, high, "08:00 UK", xloc = xloc.bar_time, style = label.style_label_down, color = #ffffff00, textcolor = txtCol, size = tSize), na, high, true, dayCount, false, false, false, "uk", colUK))
+
+// ═══════════════════════════════════════════════════════════════════
+// EVERY BAR: grow to the current candle, stop at the end of London, dash once traded through
+// ═══════════════════════════════════════════════════════════════════
+inNYc = sessOn("0500-1100")
+nS = store.size()
+if nS > 0
+    for i = 0 to nS - 1
+        lv = store.get(i)
+        if lv.live and lv.day != dayCount
+            lv.live := false
+        stopNow = lv.live and ((lv.grp == "dr" and not inLon) or (lv.grp == "pre" and not inPLd) or (lv.grp == "ny" and not inNYc))
+        if lv.live
+            if not na(lv.ln)
+                lv.ln.set_x2(time)
+            lv.lb.set_x(time)
+        // levels count as traded through on a touch; the carried London high / low only when price trades beyond them
+        bool strict = lv.grp == "ny"
+        if lv.watch and lv.live and not stopNow and not lv.hit and (lv.above ? (strict ? high > lv.y : high >= lv.y) : (strict ? low < lv.y : low <= lv.y))
+            lv.hit := true
+            if not na(lv.ln)
+                lv.ln.set_style(line.style_dashed)
+            if lv.grp == "ny"
+                lv.lb.set_text((lv.above ? "London high" : "London low") + " · taken " + hhmm(time))
+                if lv.above
+                    nyHt := time
+                else
+                    nyLt := time
+                if alNY
+                    alert(syminfo.ticker + " · " + (lv.above ? "London high " : "London low ") + str.tostring(lv.y, format.mintick) + " taken at " + hhmm(time) + " ET", alert.freq_once_per_bar)
+        if stopNow
+            lv.live := false
+            if lv.grp == "ny" and not lv.hit
+                lv.lb.set_text((lv.above ? "London high" : "London low") + " · not taken by 11:00")
+
+// ═══════════════════════════════════════════════════════════════════
+// LONDON CARD (02:00 → 17:00 ET) and RECENT LONDON SESSIONS
+// ═══════════════════════════════════════════════════════════════════
+int   mNow   = hour(time, tz) * 60 + minute(time, tz)
+bool  defOn  = asset != "Custom" and drSess == "0200-0230" and lonSess == "0200-0500" and atrLen == 5 and useTR
+bool  oddsOk = defOn and expMode == "SD at the London extreme" and expSD == 2.0 and coilMax == 0.20
+bool  coiled = not na(coil) and coil <= 0.20
+bH(float d) => d < 0.25 ? 0 : d < 0.5 ? 1 : d < 1.0 ? 2 : d < 2.0 ? 3 : 4
+tierNm(int t) => t == 3 ? "BOTH" : t == 2 ? (modeSD ? "COILED" : "VOLATILE") : t == 1 ? "CBDR" : "NEITHER"
+tierC(int t) => t == 3 ? colBoth : t == 2 ? colF1 : t == 1 ? colCB : colN
+var table TC = na
+var table TH = na
+cRow(table t, int r, string k, string v, string w, string tip, color vc) =>
+    t.cell(0, r, k, text_color = cSub, text_size = cSz, text_halign = text.align_left, bgcolor = cBody, text_font_family = font.family_monospace, tooltip = tip)
+    t.cell(1, r, v, text_color = na(vc) ? cTxt : vc, text_size = cSz, text_halign = text.align_left, bgcolor = cBody, text_font_family = font.family_monospace, tooltip = tip)
+    t.cell(2, r, w, text_color = na(vc) ? cTxt : vc, text_size = cSz, text_halign = text.align_right, bgcolor = cBody, text_font_family = font.family_monospace, tooltip = tip)
+cHead(table t, string a, string b, string pill, color bg) =>
+    t.cell(0, 0, a, text_color = hdrTx(bg), bgcolor = bg, text_size = cSz, text_halign = text.align_left, text_font_family = font.family_monospace)
+    t.cell(1, 0, b, text_color = hdrTx(bg), bgcolor = bg, text_size = cSz, text_halign = text.align_left, text_font_family = font.family_monospace)
+    t.cell(2, 0, pill, text_color = bg, bgcolor = lumOf(bg) > 165 ? #131722 : #ffffff, text_size = cSz, text_halign = text.align_center, text_font_family = font.family_monospace)
+
+if barstate.islast and showCard
+    if na(TC)
+        TC := table.new(posOf(cardPos), 3, 9, border_width = 0, frame_width = 1, frame_color = color.new(qCol, 30))
+    TC.clear(0, 0, 2, 8)
+    TC.set_frame_color(color.new(qCol, 30))
+    bool today  = dDay == dayCount
+    bool live   = today and inLon and not inDR
+    bool done   = lonDay == dayCount and not inLon
+    string nowT = hhmm(time) + " ET"
+    if inDR
+        float fH = dH
+        float fL = dL
+        cHead(TC, "◇ DOMAIN EXPANSION", "LONDON · " + nowT, "FORMING", color.gray)
+        cRow(TC, 1, "RANGE", "forming · " + str.tostring(math.round(fH - fL)) + " pts so far", "to 02:29", "The domain range: 02:00–02:29 ET. The tier is checked at 02:30.", na)
+        cRow(TC, 2, "ATR", na(atrPts) ? "overnight ATR warming up" : "overnight ATR " + str.tostring(math.round(atrPts)) + " pts", "", "Overnight ATR(" + str.tostring(atrLen) + "): average overnight (18:00 → 02:29) true range. Coiled = domain range ÷ this ≤ " + str.tostring(coilMax, "0.00") + ".", na)
+    else if live
+        float lHs  = math.max(dH, lonHi)
+        float lLs  = math.min(dL, lonLo)
+        float upS  = math.max(0.0, (lonHi - dH) / rD)
+        float dnS  = math.max(0.0, (dL - lonLo) / rD)
+        float far  = math.max(upS, dnS)
+        float pos  = (mNow - 150) / 15.0
+        float lrE  = defOn and not na(atrPts) ? 1.794 * math.pow(rD, 0.497) * math.pow(atrPts, 0.437) : na
+        // the live odds of 2 SD by 04:59
+        float p2   = not oddsOk ? na : far >= 2.0 ? 100.0 : pos < 1 and far < 0.5 ? (tier == 3 ? 63.0 : tier == 2 ? 47.0 : tier == 1 ? 39.0 : 19.0) : tblAt(coiled ? LVC : LVO, 4, pos, int(math.min(3, math.floor(far / 0.5))))
+        // the London high / low already in
+        float dHi  = (lHs - close) / rD
+        float dLo  = (close - lLs) / rD
+        float pHi  = defOn ? tblAt(coiled ? INC : INO, 5, pos, bH(dHi)) : na
+        float pLo  = defOn ? tblAt(coiled ? INC : INO, 5, pos, bH(dLo)) : na
+        cHead(TC, (tier == 3 ? "◆◆" : tier >= 1 ? "◆" : "◇") + " DOMAIN EXPANSION", "LONDON · " + nowT, tierNm(tier), qCol)
+        string cTx = na(coil) ? "coil n/a" : "coil " + str.tostring(coil, "0.00") + (qualC ? " ✓" : " ✗")
+        string bTx = na(cbPts) ? "CBDR n/a" : "CBDR " + str.tostring(cbPts / rD, "0.0") + "×" + (cbOK ? " ✓" : " ✗")
+        cRow(TC, 1, "RANGE", str.tostring(math.round(rD)) + " pts · " + cTx, bTx, "Domain range 02:00–02:29 ET and the two factors checked at 02:30: coiled = range ÷ overnight ATR(" + str.tostring(atrLen) + ") ≤ " + str.tostring(coilMax, "0.00") + "; CBDR wide = the 14:00–20:00 range ≥ " + str.tostring(cbMult, "0.0") + " domain ranges. 2 SD at the London extreme, NQ + ES + RTY 2018–26: both 63% · coiled only 47% · CBDR only 39% · neither 19% (2025–26: 61 · 39 · 38 · 17).", na)
+        cRow(TC, 2, "EXPECT", na(lrE) ? "London range —" : "London ≈ " + str.tostring(math.round(lrE)) + " pts", na(lrE) ? "" : str.tostring(math.round(lrE * 0.778)) + "–" + str.tostring(math.round(lrE * 1.293)), "Expected London range (02:00–04:59), from the domain range and the overnight ATR: 1.79 × range^0.50 × ATR^0.44 points, fitted on NQ + ES + RTY 2018–24. Middle half shown right. Checked on 2025–26: 48% of sessions landed in the middle half, R² 0.87; 2025–26 ranges ran about 6% under the estimate.", na)
+        float lrNow = lHs - lLs
+        cRow(TC, 3, "DONE", gauge(na(lrE) ? 0.0 : lrNow / lrE) + " " + str.tostring(math.round(lrNow)) + " pts", na(lrE) ? "" : pctI(100 * lrNow / lrE), "London range so far (02:00 → now) against the expected range. Past 100%, London has already done a typical session's work.", na)
+        cRow(TC, 4, "SD", "▲ " + str.tostring(upS, "0.0") + " · ▼ " + str.tostring(dnS, "0.0"), "furthest", "The furthest price has gone past the domain range since 02:30, in domain ranges (SD), above and below.", na)
+        cRow(TC, 5, "2 SD", expHit ? "✓ " + (modeSD ? sdTxtOf(expSD) : pctTxt(expPctE)) + " reached " + hhmm(expT) : "by 04:59", expHit ? "" : pctI(p2), "How often London went on to reach 2 SD past the domain range by 04:59, from this time and the furthest SD so far" + (coiled ? " (coiled days)" : " (days not coiled)") + ". At 02:30 it is the tier's rate. NQ + ES + RTY 2018–26, read between 15-minute checkpoints." + (oddsOk ? "" : " Shown only at the default settings."), expHit ? qCol : na)
+        cRow(TC, 6, "HIGH", "London high " + str.tostring(dHi, "0.0") + " SD away", "in " + pctI(pHi), "How often the London high (02:00–04:59) was already in at this time, with price this far below it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
+        cRow(TC, 7, "LOW", "London low " + str.tostring(dLo, "0.0") + " SD away", "in " + pctI(pLo), "How often the London low (02:00–04:59) was already in at this time, with price this far above it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
+    else if done
+        float lr = lH5 - lL5
+        cHead(TC, (resV != 0 ? "✓" : "✗") + " DOMAIN EXPANSION", "LONDON DONE · " + nowT, tierNm(tier), qCol)
+        cRow(TC, 1, "RESULT", resV == 1 ? "▲ expansion" : resV == -1 ? "▼ expansion" : "no expansion", (resSD >= 0 ? "▲ " : "▼ ") + str.tostring(math.abs(resSD), "0.0") + " SD", "The result at 05:00 by the measure in settings, and the furthest SD past the domain range.", resV != 0 ? qCol : na)
+        cRow(TC, 2, "RANGE", "London " + str.tostring(math.round(lr)) + " pts", na(adrD) or adrD <= 0 ? "" : str.tostring(lr / adrD, "0.00") + " ADR", "London range 02:00–04:59 against ADR20 of the trading day (daily bars). NQ + ES + RTY 2018–26: median 0.24, middle half 0.18–0.34.", na)
+        string ftE = str.substring(ftSess, 5, 7) + ":" + str.substring(ftSess, 7, 9)
+        cRow(TC, 3, "FOLLOW", na(ftRes) ? "close at " + ftE + " ET" : ftRes, na(ftRes) ? "pending" : ftE, "Follow-through: the close at the end of its window (" + ftSess + " ET) against the domain range, in SD. Some expansions finish after London.", na)
+        cRow(TC, 4, "NY HIGH", str.tostring(lH5, format.mintick), na(nyHt) ? (mNow < 660 ? "open · 75%" : "not taken") : "taken " + hhmm(nyHt), "The London high, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 75% of sessions (NY AM 09:30–10:59: 66%).", na(nyHt) ? na : qCol)
+        cRow(TC, 5, "NY LOW", str.tostring(lL5, format.mintick), na(nyLt) ? (mNow < 660 ? "open · 71%" : "not taken") : "taken " + hhmm(nyLt), "The London low, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 71% of sessions (NY AM 09:30–10:59: 62%).", na(nyLt) ? na : qCol)
+    else
+        cHead(TC, "◇ DOMAIN EXPANSION", "LONDON · " + nowT, "NEXT", color.gray)
+        cRow(TC, 1, "NEXT", "domain range 02:00–02:29 ET", "", "The card goes live at 02:30, when the tier is checked.", na)
+        int nh = hK.size()
+        if nh > 0
+            int  lr0 = hR.get(nh - 1)
+            cRow(TC, 2, "LAST", str.format_time(hK.get(nh - 1), "EEE dd", tz) + " · " + tierNm(hT.get(nh - 1)), (lr0 == 1 ? "▲ ✓ " : lr0 == -1 ? "▼ ✓ " : "✗ ") + str.tostring(math.round(hP.get(nh - 1))) + " pts", "The last London session: tier, result and range.", na)
+if barstate.islast and showHist and hK.size() > 0
+    int nh = hK.size()
+    int nr = math.min(histN, nh)
+    if na(TH)
+        TH := table.new(posOf(histPos), 5, 32, border_width = 0, frame_width = 1, frame_color = color.new(color.gray, 60))
+    TH.clear(0, 0, 4, 31)
+    int ex = 0
+    for i = nh - nr to nh - 1
+        ex += hR.get(i) != 0 ? 1 : 0
+    TH.cell(0, 0, "LONDON", text_color = #ffffff, bgcolor = color.new(#5e35b1, 0), text_size = cSz, text_halign = text.align_left, text_font_family = font.family_monospace)
+    TH.cell(1, 0, "last " + str.tostring(nr), text_color = #ffffff, bgcolor = color.new(#5e35b1, 0), text_size = cSz, text_halign = text.align_left, text_font_family = font.family_monospace)
+    TH.cell(2, 0, "", bgcolor = color.new(#5e35b1, 0))
+    TH.cell(3, 0, "", bgcolor = color.new(#5e35b1, 0))
+    TH.cell(4, 0, str.tostring(ex) + "/" + str.tostring(nr) + " expanded", text_color = #ffffff, bgcolor = color.new(#5e35b1, 0), text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace, tooltip = "Sessions that met the expansion measure in settings at 05:00. NQ + ES + RTY 2018–26 at 2 SD at the London extreme: 37% of all sessions.")
+    hdr = array.from("day", "tier", "05:00", "furthest", "range")
+    for c = 0 to 4
+        TH.cell(c, 1, hdr.get(c), text_color = cSub, bgcolor = cBody, text_size = cSz, text_halign = c == 0 ? text.align_left : text.align_right, text_font_family = font.family_monospace)
+    int r = 2
+    for i = nh - 1 to nh - nr
+        int   rv = hR.get(i)
+        float sv = hS.get(i)
+        color tcI = tierC(hT.get(i))
+        TH.cell(0, r, str.format_time(hK.get(i), "EEE dd", tz), text_color = cTxt, bgcolor = cBody, text_size = cSz, text_halign = text.align_left, text_font_family = font.family_monospace)
+        TH.cell(1, r, tierNm(hT.get(i)), text_color = tcI, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
+        TH.cell(2, r, rv == 1 ? "▲ ✓" : rv == -1 ? "▼ ✓" : "✗", text_color = rv != 0 ? tcI : cSub, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
+        TH.cell(3, r, (sv >= 0 ? "▲ " : "▼ ") + str.tostring(math.abs(sv), "0.0") + " SD", text_color = cTxt, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
+        TH.cell(4, r, str.tostring(math.round(hP.get(i))) + " pts", text_color = cTxt, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
+        r += 1
