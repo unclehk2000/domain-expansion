@@ -1,7 +1,7 @@
 // This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Unclehk2000
 //@version=6
-indicator("Domain Expansion — London Range, Overnight ATR & CBDR Qualifier", "Domain Expansion", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+indicator("Domain Expansion — London Expansion & Hollow Purple (NY PM)", "Domain Exp", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 tz = "America/New_York"
 
@@ -17,6 +17,8 @@ maxDays = input.int(10, "Days to keep", minval = 1, group = g_D, display = displ
 ageDays = input.int(5, "Fresh for first N trading days", minval = 1, group = g_D, display = display.none)
 ageMode = input.string("Fade", "Older days", options = ["Fade", "Grey", "Keep"], tooltip = "Fade: older days keep their tier colour, half as strong. Grey: older days turn grey. Keep: no change.", group = g_D, display = display.none)
 agedCol = input.color(color.gray, "Grey colour", group = g_D, display = display.none)
+layI    = input.string("Desktop", "Layout", options = ["Desktop", "Mobile"], group = g_D, tooltip = "Desktop: every row. Mobile: narrow cards for a phone: the London card and the Hollow Purple card fold to their key rows, and the recent-sessions table is hidden. Every row keeps its explanation in the tooltip. On a phone the cards take about 60% of the chart width at Small text; Tiny makes them narrower. The default places keep the tables apart: London card top right, Hollow Purple bottom right, recent sessions bottom left. Chart layouts sync across devices, so keep a separate chart layout for the phone.", display = display.none)
+mob     = layI == "Mobile"
 
 var g_S = "Sessions (ET)"
 drSess  = input.session("0200-0230", "Domain range (forms)", group = g_S, display = display.none)
@@ -91,11 +93,27 @@ showCard = input.bool(true, "London card", inline = "lc", group = g_C, tooltip =
 cardPos  = input.string("Top right", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "lc", group = g_C, display = display.none)
 cardSzI  = input.string("Small", "Card text", options = ["Tiny", "Small", "Normal"], group = g_C, display = display.none)
 showHist = input.bool(true, "Recent London sessions", inline = "rh", group = g_C, tooltip = "One row per London session, newest first: tier, the result at 05:00, the furthest SD past the domain range (▲ above, ▼ below) and the London range (02:00–04:59) in points. Built from the chart's own history, so a 1-minute chart lists the days it has loaded.", display = display.none)
-histPos  = input.string("Bottom right", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "rh", group = g_C, display = display.none)
+histPos  = input.string("Bottom left", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "rh", group = g_C, display = display.none)
 histN    = input.int(10, "last", minval = 3, maxval = 30, inline = "rh", group = g_C, display = display.none)
 
 var g_N = "London → New York"
 showCarry = input.bool(true, "Carry the London high / low to 11:00 ET", group = g_N, tooltip = "The London high and low (02:00–04:59) drawn from 05:00 to 11:00 ET, each marked when it is taken.\n\nNQ + ES + RTY 2018–26: NY AM (09:30–10:59) took the London high on 66% of sessions and the low on 62%. By 11:00 (from 05:00): 75% and 71%. At least one of the two 99%, both 48%. Steady in 2018–24 and 2025–26 and on each symbol.", display = display.none)
+
+var g_HP = "Hollow Purple · NY PM (13:30 → 16:14 ET)"
+showHP  = input.bool(true, "Hollow Purple", inline = "hp", group = g_HP, tooltip = "The NY PM model. The PM range (13:30–13:59 ET) is set at 14:00. Where the 13:59 close sits in it gives the odds of which side breaks first; the −0.5 ARP (algorithmic range projection: half the range beyond its high or low) and 1 / 1.5 / 2 SD run to 16:14. The final-hour range (15:00–15:49) is drawn as it forms and set at 15:50, with its −0.5 ARP for the market-on-close macro (15:50–16:00).\n\nNQ + ES + RTY 1-minute 2018–26, 6,333 sessions. Each figure held in 2018–24 and 2025–26 and on each symbol.", display = display.none)
+hpCol   = input.color(#9c27b0, "", inline = "hp", group = g_HP, display = display.none)
+hpSess  = input.session("1330-1400", "PM range (forms)", group = g_HP, tooltip = "ICT's NY PM session starts with the 13:30 pre-market; its first 30 minutes are the PM range, as 09:30–10:00 is for the morning. Odds are shown only at 13:30–14:00.", display = display.none)
+hpBox   = input.bool(true, "Shade the PM range", inline = "hb", group = g_HP, display = display.none)
+hpCE    = input.bool(true, "CE (midpoint)", inline = "hb", group = g_HP, display = display.none)
+hpS05   = input.bool(true, "−0.5 ARP", inline = "hs", group = g_HP, tooltip = "Levels beyond the PM range in PM-range multiples, drawn on both sides from 14:00 to 16:14. On the side that broke first, reached by 16:14: −0.5 ARP 74%, 1 SD 51%, 1.5 SD 35%, 2 SD 23% (2025–26: 69 · 45 · 30 · 18).", display = display.none)
+hpS10   = input.bool(true, "1", inline = "hs", group = g_HP, display = display.none)
+hpS15   = input.bool(true, "1.5", inline = "hs", group = g_HP, display = display.none)
+hpS20   = input.bool(true, "2 SD", inline = "hs", group = g_HP, display = display.none)
+showFH  = input.bool(true, "Final-hour range + ARP", inline = "fh", group = g_HP, tooltip = "The final-hour range (15:00–15:49) drawn as it forms and set at 15:50, then its −0.5 ARP above and below to 16:14. Needs a chart of 5 minutes or less.\n\nThe MOC macro (15:50–15:59) took one side of it on 72% of sessions (high 37%, low 37%, both 3%); to 16:14, 80%. It reached the −0.5 ARP on 16% (to 16:14: 27%; 31% of runs that took a side). Tested and not found: the runs do not stop at −0.5 any more than at −0.375 or −0.625, and MOC lows / highs do not land on the day's octant, 16th or quadrant more than on a shifted grid. A map, not a turning point.", display = display.none)
+fhCol   = input.color(color.new(#9c27b0, 35), "", inline = "fh", group = g_HP, display = display.none)
+showMOC = input.bool(true, "Shade the MOC macro (15:50–16:00)", group = g_HP, display = display.none)
+showHPc = input.bool(true, "Hollow Purple card", inline = "hc", group = g_HP, tooltip = "14:00 → 16:14 ET: the PM range and the 14:00 read (odds of the first break), the break, the −0.5 ARP and SDs on that side with ✓ or the live odds by 16:14, then the final-hour range, the MOC macro and its ARP.", display = display.none)
+hpCPos  = input.string("Bottom right", "", options = ["Top left", "Top center", "Top right", "Middle left", "Middle right", "Bottom left", "Bottom center", "Bottom right"], inline = "hc", group = g_HP, display = display.none)
 
 var g_AL = "Alerts · one alert on \"Any alert() function call\" covers these"
 alDR  = input.bool(true, "Domain range set (02:30), with the tier", group = g_AL, display = display.none)
@@ -103,6 +121,10 @@ alBrk = input.bool(true, "First break in the execution window", group = g_AL, di
 alExp = input.bool(true, "Expansion line reached", group = g_AL, display = display.none)
 alRes = input.bool(true, "London result (05:00)", group = g_AL, display = display.none)
 alNY  = input.bool(true, "London high / low taken before 11:00", group = g_AL, display = display.none)
+alHP  = input.bool(true, "Hollow Purple: PM range set (14:00), with the read", group = g_AL, display = display.none)
+alHPb = input.bool(true, "Hollow Purple: first break of the PM range", group = g_AL, display = display.none)
+alHPs = input.bool(true, "Hollow Purple: −0.5 ARP / SD reached on the break side", group = g_AL, display = display.none)
+alFH  = input.bool(true, "Hollow Purple: final-hour range set (15:50) and its ARP reached", group = g_AL, display = display.none)
 
 // Theme: Auto follows the chart background; colours left at their default (#000001) follow it
 bgLum  = 0.299 * color.r(chart.bg_color) + 0.587 * color.g(chart.bg_color) + 0.114 * color.b(chart.bg_color)
@@ -112,6 +134,7 @@ txtCol = autoC(txtColI) ? (bgLum < 128 ? #d1d4dc : #131722) : txtColI           
 cTxt   = isDark ? #d1d4dc : #131722                                                // card text, from the card theme only
 lumOf(color c) => 0.299 * color.r(c) + 0.587 * color.g(c) + 0.114 * color.b(c)
 hdrTx(color c) => lumOf(c) > 165 ? #131722 : #ffffff                                // dark text on light tier colours
+mixC(color a, color b, float w) => color.rgb(color.r(a) * w + color.r(b) * (1 - w), color.g(a) * w + color.g(b) * (1 - w), color.b(a) * w + color.b(b) * (1 - w))
 
 
 if not timeframe.isintraday or timeframe.in_seconds() > 15 * 60
@@ -333,8 +356,13 @@ nightCtx() =>
         cl := math.min(cl, low)
     if not inC and inC[1] and not na(ch)
         cv := ch - cl
-    [ap, aq, cv]
-[atrPct, atrPts, cbPts] = request.security(syminfo.tickerid, "15", nightCtx(), lookahead = barmerge.lookahead_on)
+    // ATR15 at 13:30 (Hollow Purple's distance unit): RMA-14 of 15-minute true ranges, finished bars only
+    var float a13 = na
+    float a15 = ta.rma(ta.tr(true), 14)
+    if hour(time, tz) == 13 and minute(time, tz) == 30
+        a13 := a15[1]
+    [ap, aq, cv, a13]
+[atrPct, atrPts, cbPts, atr1330] = request.security(syminfo.tickerid, "15", nightCtx(), lookahead = barmerge.lookahead_on)
 // ADR20 of the trading day from daily bars (the CME 18:00–17:00 day), for the London summary
 float adrD = request.security(ticker.modify(syminfo.tickerid, backadjustment = backadjustment.off), "D", ta.sma(high - low, 20)[1], lookahead = barmerge.lookahead_on)
 
@@ -625,6 +653,197 @@ if showUK and ukStart
     store.push(Lv.new(line.new(time, low, time, high + syminfo.mintick, xloc = xloc.bar_time, extend = extend.both, color = colUK, style = line.style_dotted), label.new(time, high, "08:00 UK", xloc = xloc.bar_time, style = label.style_label_down, color = #ffffff00, textcolor = txtCol, size = tSize), na, high, true, dayCount, false, false, false, "uk", colUK))
 
 // ═══════════════════════════════════════════════════════════════════
+// HOLLOW PURPLE · NY PM: the PM range (13:30 → 13:59), its read at 14:00, −0.5 ARP / SDs to 16:14,
+// the final-hour range (15:00 → 15:49) and its ARP for the market-on-close macro (15:50 → 16:00)
+// ═══════════════════════════════════════════════════════════════════
+// NQ + ES + RTY 1-minute 2018–26, 6,333 sessions. HPU: % whose first break after 14:00 was up, by the 13:59 close's octant
+// in the PM range (steady in 2018–24 and 2025–26 and on each symbol). Live odds: the chance a level not yet traded since
+// 13:30 trades by 16:14, logit = I(t) + a·d + b·√d, d = distance in ATR15 (the 15-minute ATR(14) at 13:30), t = minutes
+// after 13:30 with checkpoints at 14:00 / 14:30 / 15:00 / 15:30 / 15:50 / 16:00; fit 2018–24, scored on 2025–26: Brier
+// 0.116 → 0.092. The final hour: odds the MOC takes the high first = logistic in where 15:50 opens in the range (−3.133 +
+// 6.277 × position; Brier 0.250 → 0.146 on 2025–26).
+var array<float> HPU = array.from(11.9, 19.4, 28.9, 44.0, 55.2, 67.0, 79.0, 88.9)
+var array<float> HPK = array.from(0.5, 1.0, 1.5, 2.0)
+var array<float> HPB = array.from(74.0, 51.0, 35.0, 23.0)        // base rates on the first-break side by 16:14
+var array<float> HX  = array.from(30.0, 60.0, 90.0, 120.0, 140.0, 150.0)
+var array<float> HI  = array.from(4.910, 4.582, 4.222, 3.732, 3.232, 1.977)
+HA = 0.6714
+HB = -5.1575
+pPM(float m, float d) =>
+    float it = na
+    float dd = d
+    if not na(m) and not na(d) and m >= 30 and m < 165
+        if m >= 150
+            it := HI.get(5)
+            dd := d / math.sqrt(math.max((165 - m) / 15.0, 0.01))
+        else
+            int i = 0
+            while i < 4 and m >= HX.get(i + 1)
+                i += 1
+            float f = (m - HX.get(i)) / (HX.get(i + 1) - HX.get(i))
+            it := HI.get(i) * (1 - f) + HI.get(i + 1) * f
+    float dc = math.max(0.0, math.min(30.0, dd))
+    na(it) ? na : 100.0 / (1.0 + math.exp(-(it + HA * dc + HB * math.sqrt(dc))))
+hpFine  = timeframe.in_seconds() <= 300
+hpDef   = hpSess == "1330-1400" and asset != "Custom"
+inHPr   = sessOn(hpSess)
+inHPrun = sessOn("1330-1615")
+inFH    = sessOn("1500-1550")
+inMOC   = sessOn("1550-1600")
+hpStart = inHPr and not inHPr[1]
+hpEnd   = not inHPr and inHPr[1]
+fhStart = inFH and not inFH[1]
+fhEnd   = not inFH and inFH[1]
+mkG(int t0, float y, color col, int w, string st, string txt, bool above, bool watch, string grp, string tip) =>
+    lv = Lv.new(line.new(t0, y, time, y, xloc = xloc.bar_time, color = col, style = st, width = w), label.new(time, y, txt, xloc = xloc.bar_time, style = label.style_label_left, color = #ffffff00, textcolor = txtCol, size = tSize, tooltip = tip), na, y, above, dayCount, false, true, watch, grp, col)
+    store.push(lv)
+    lv
+var float hpH    = na
+var float hpL    = na
+var int   hpT0   = na
+var int   hpDay  = na
+var float hpR    = na
+var float hpPos  = na
+var float hpUp   = na      // odds the first break is up
+var int   hpBrkT = na
+var int   hpBrk  = 0       // 1 up · −1 down
+var int   hpOthT = na      // the other side taken after the break
+var array<int> hpTU = array.new<int>(4, na)
+var array<int> hpTD = array.new<int>(4, na)
+var float hpAtr  = na
+if showHP and hpStart
+    hpH  := high
+    hpL  := low
+    hpT0 := time
+else if showHP and inHPr
+    hpH := math.max(hpH, high)
+    hpL := math.min(hpL, low)
+if showHP and hpEnd and not na(hpH) and hpH > hpL
+    hpDay  := dayCount
+    hpR    := hpH - hpL
+    hpPos  := (close[1] - hpL) / hpR
+    hpUp   := HPU.get(math.max(0, math.min(7, int(math.floor(hpPos * 8)))))
+    hpBrkT := na
+    hpBrk  := 0
+    hpOthT := na
+    hpAtr  := atr1330
+    for j = 0 to 3
+        hpTU.set(j, na)
+        hpTD.set(j, na)
+    string rTx = "PM range 13:30–13:59 ET, " + str.tostring(hpR, format.mintick) + " pts" + (na(adrD) or adrD <= 0 ? "" : " (" + str.tostring(hpR / adrD, "0.00") + " ADR)") + ". "
+    if hpBox
+        store.push(Lv.new(na, label.new(hpT0, hpH, "", xloc = xloc.bar_time, style = label.style_none), box.new(hpT0, hpH, time, hpL, xloc = xloc.bar_time, bgcolor = color.new(hpCol, 88), border_color = color.new(hpCol, 100)), hpH, true, dayCount, false, false, false, "box", color.new(hpCol, 88)))
+    mkG(hpT0, hpH, hpCol, 1, line.style_solid, "PM high", true, true, "hpE", rTx + "Taken first after 14:00 on " + str.tostring(math.round(hpUp)) + "% of sessions with the 13:59 close where it was today.")
+    mkG(hpT0, hpL, hpCol, 1, line.style_solid, "PM low", false, true, "hpE", rTx + "Taken first after 14:00 on " + str.tostring(math.round(100 - hpUp)) + "% of sessions with the 13:59 close where it was today.")
+    if hpCE
+        mkG(hpT0, (hpH + hpL) / 2, color.new(hpCol, 40), 1, line.style_dotted, "PM CE", true, false, "hp", rTx + "CE (midpoint).")
+    for j = 0 to 3
+        float k = HPK.get(j)
+        if (j == 0 and hpS05) or (j == 1 and hpS10) or (j == 2 and hpS15) or (j == 3 and hpS20)
+            string nm = j == 0 ? "0.5 ARP" : str.tostring(k, "0.#") + " SD"
+            string tp = rTx + "On the side that broke first, reached by 16:14 on " + str.tostring(HPB.get(j), "0") + "% of sessions."
+            mkG(time, hpH + k * hpR, color.new(hpCol, j == 0 ? 0 : 35), j == 0 ? 2 : 1, j == 0 ? line.style_solid : line.style_dotted, "+" + nm, true, true, "hp", tp)
+            mkG(time, hpL - k * hpR, color.new(hpCol, j == 0 ? 0 : 35), j == 0 ? 2 : 1, j == 0 ? line.style_solid : line.style_dotted, "−" + nm, false, true, "hp", tp)
+    string rd = hpUp >= 50 ? "▲ first " + str.tostring(math.round(hpUp)) + "%" : "▼ first " + str.tostring(math.round(100 - hpUp)) + "%"
+    if showNotes
+        mkEvent(hpUp >= 50 ? hpL : hpH, "◆ Hollow Purple · 13:59 close at " + str.tostring(hpPos, "0.00") + " → " + rd, hpCol, hpUp >= 50 ? label.style_label_up : label.style_label_down)
+    if alHP
+        alert(syminfo.ticker + " · Hollow Purple · PM range set " + str.tostring(hpR, format.mintick) + " pts (" + str.tostring(hpH, format.mintick) + " / " + str.tostring(hpL, format.mintick) + ") · 13:59 close at " + str.tostring(hpPos, "0.00") + " → " + rd + (hpDef ? "" : " (odds measured at 13:30–14:00)"), alert.freq_once_per_bar)
+bool hpLive = hpDay == dayCount and inHPrun and not inHPr
+if hpLive
+    if na(hpBrkT) and (high > hpH or low < hpL)
+        hpBrkT := time
+        hpBrk  := high > hpH and low < hpL ? (close >= open ? 1 : -1) : high > hpH ? 1 : -1
+        if showBrk
+            mkEvent(hpBrk == 1 ? high : low, (hpBrk == 1 ? "▲ PM break " : "▼ PM break ") + hhmm(time) + " · ARP 74%", hpCol, hpBrk == 1 ? label.style_label_down : label.style_label_up)
+        if alHPb
+            alert(syminfo.ticker + " · Hollow Purple · " + (hpBrk == 1 ? "▲" : "▼") + " PM range break " + hhmm(time) + " ET · on this side by 16:14: ARP 74%, 1 SD 51%, 1.5 SD 35%, 2 SD 23%", alert.freq_once_per_bar)
+    else if not na(hpBrkT) and na(hpOthT) and time > hpBrkT and (hpBrk == 1 ? low < hpL : high > hpH)
+        hpOthT := time
+    for j = 0 to 3
+        float k = HPK.get(j)
+        if na(hpTU.get(j)) and high >= hpH + k * hpR
+            hpTU.set(j, time)
+            if alHPs and hpBrk == 1
+                alert(syminfo.ticker + " · Hollow Purple · +" + (j == 0 ? "0.5 ARP " : str.tostring(k, "0.#") + " SD ") + str.tostring(hpH + k * hpR, format.mintick) + " reached " + hhmm(time) + " ET", alert.freq_once_per_bar)
+        if na(hpTD.get(j)) and low <= hpL - k * hpR
+            hpTD.set(j, time)
+            if alHPs and hpBrk == -1
+                alert(syminfo.ticker + " · Hollow Purple · −" + (j == 0 ? "0.5 ARP " : str.tostring(k, "0.#") + " SD ") + str.tostring(hpL - k * hpR, format.mintick) + " reached " + hhmm(time) + " ET", alert.freq_once_per_bar)
+
+// the final-hour range (15:00 → 15:49), drawn as it forms; set at 15:50 with its −0.5 ARP; the MOC macro 15:50 → 16:00
+var float fhH   = na
+var float fhL   = na
+var int   fhDay = na
+var float fhR   = na
+var float fhPos = na
+var float fhUp  = na       // odds the MOC takes the high first
+var Lv    fhLvH = na
+var Lv    fhLvL = na
+var int   mocHt = na       // the final-hour high / low taken from 15:50, and the ARPs reached
+var int   mocLt = na
+var int   arpUt = na
+var int   arpDt = na
+bool fhOn = showHP and showFH and hpFine
+if fhOn and fhStart
+    fhH := high
+    fhL := low
+    fhLvH := mkG(time, high, fhCol, 1, line.style_solid, "Final-hour high (forming)", true, false, "fhE", "The final-hour range: 15:00–15:49 ET, set at 15:50.")
+    fhLvL := mkG(time, low, fhCol, 1, line.style_solid, "Final-hour low (forming)", false, false, "fhE", "The final-hour range: 15:00–15:49 ET, set at 15:50.")
+else if fhOn and inFH and not na(fhLvH)
+    fhH := math.max(fhH, high)
+    fhL := math.min(fhL, low)
+    fhLvH.y := fhH
+    fhLvH.ln.set_y1(fhH)
+    fhLvH.ln.set_y2(fhH)
+    fhLvH.lb.set_y(fhH)
+    fhLvL.y := fhL
+    fhLvL.ln.set_y1(fhL)
+    fhLvL.ln.set_y2(fhL)
+    fhLvL.lb.set_y(fhL)
+if fhOn and fhEnd and not na(fhH) and fhH > fhL and not na(fhLvH)
+    fhDay := dayCount
+    fhR   := fhH - fhL
+    fhPos := math.max(0.0, math.min(1.0, (open - fhL) / fhR))
+    fhUp  := 100.0 / (1.0 + math.exp(-(-3.133 + 6.277 * fhPos)))
+    mocHt := na
+    mocLt := na
+    arpUt := na
+    arpDt := na
+    fhLvH.watch := true
+    fhLvL.watch := true
+    fhLvH.lb.set_text("Final-hour high")
+    fhLvL.lb.set_text("Final-hour low")
+    string fTx = "Final-hour range 15:00–15:49, " + str.tostring(fhR, format.mintick) + " pts. "
+    fU = mkG(time, fhH + 0.5 * fhR, fhCol, 2, line.style_dashed, "+0.5 ARP · final hour", true, true, "fh", fTx + "Its −0.5 ARP: half the range above the high. The MOC macro reached one of the two ARPs on 16% of sessions (to 16:14: 27%).")
+    fD = mkG(time, fhL - 0.5 * fhR, fhCol, 2, line.style_dashed, "−0.5 ARP · final hour", false, true, "fh", fTx + "Its −0.5 ARP: half the range below the low. The MOC macro reached one of the two ARPs on 16% of sessions (to 16:14: 27%).")
+    // labels that meet near the PM levels move above or below their line, so both stay legible
+    int nF = store.size()
+    for i = 0 to nF - 1
+        a = store.get(i)
+        if a.day == dayCount and (a.grp == "hp" or a.grp == "hpE")
+            for fl in array.from(fhLvH, fhLvL, fU, fD)
+                if math.abs(a.y - fl.y) <= 0.15 * fhR
+                    awayFrom(fl, a.y)
+                    awayFrom(a, fl.y)
+    if alFH
+        alert(syminfo.ticker + " · Hollow Purple · final-hour range set " + str.tostring(fhR, format.mintick) + " pts · ARP ▲ " + str.tostring(fhH + 0.5 * fhR, format.mintick) + " ▼ " + str.tostring(fhL - 0.5 * fhR, format.mintick) + " · MOC takes the high first " + str.tostring(math.round(fhUp)) + "%", alert.freq_once_per_bar)
+if fhOn and fhDay == dayCount and inHPrun and not inFH
+    if na(mocHt) and high > fhH
+        mocHt := time
+    if na(mocLt) and low < fhL
+        mocLt := time
+    if na(arpUt) and high >= fhH + 0.5 * fhR
+        arpUt := time
+        if alFH
+            alert(syminfo.ticker + " · Hollow Purple · final-hour +0.5 ARP " + str.tostring(fhH + 0.5 * fhR, format.mintick) + " reached " + hhmm(time) + " ET", alert.freq_once_per_bar)
+    if na(arpDt) and low <= fhL - 0.5 * fhR
+        arpDt := time
+        if alFH
+            alert(syminfo.ticker + " · Hollow Purple · final-hour −0.5 ARP " + str.tostring(fhL - 0.5 * fhR, format.mintick) + " reached " + hhmm(time) + " ET", alert.freq_once_per_bar)
+bgcolor(showHP and showMOC and hpFine and inMOC ? color.new(hpCol, 88) : na, title = "MOC macro")
+
+// ═══════════════════════════════════════════════════════════════════
 // EVERY BAR: grow to the current candle, stop at the end of London, dash once traded through
 // ═══════════════════════════════════════════════════════════════════
 inNYc = sessOn("0500-1100")
@@ -634,13 +853,13 @@ if nS > 0
         lv = store.get(i)
         if lv.live and lv.day != dayCount
             lv.live := false
-        stopNow = lv.live and ((lv.grp == "dr" and not inLon) or (lv.grp == "pre" and not inPLd) or (lv.grp == "ny" and not inNYc))
+        stopNow = lv.live and ((lv.grp == "dr" and not inLon) or (lv.grp == "pre" and not inPLd) or (lv.grp == "ny" and not inNYc) or ((lv.grp == "hp" or lv.grp == "hpE" or lv.grp == "fh" or lv.grp == "fhE") and not inHPrun))
         if lv.live
             if not na(lv.ln)
                 lv.ln.set_x2(time)
             lv.lb.set_x(time)
         // levels count as traded through on a touch; the carried London high / low only when price trades beyond them
-        bool strict = lv.grp == "ny"
+        bool strict = lv.grp == "ny" or lv.grp == "hpE" or lv.grp == "fhE"
         if lv.watch and lv.live and not stopNow and not lv.hit and (lv.above ? (strict ? high > lv.y : high >= lv.y) : (strict ? low < lv.y : low <= lv.y))
             lv.hit := true
             if not na(lv.ln)
@@ -687,13 +906,16 @@ if barstate.islast and showCard
     bool today  = dDay == dayCount
     bool live   = today and inLon and not inDR
     bool done   = lonDay == dayCount and not inLon
-    string nowT = hhmm(time) + " ET"
+    string nowT = hhmm(time) + (mob ? "" : " ET")
+    string ttl  = mob ? " DOMAIN" : " DOMAIN EXPANSION"
+    string ses  = mob ? "LDN " : "LONDON · "
     if inDR
         float fH = dH
         float fL = dL
-        cHead(TC, "◇ DOMAIN EXPANSION", "LONDON · " + nowT, "FORMING", color.gray)
-        cRow(TC, 1, "RANGE", "forming · " + str.tostring(math.round(fH - fL)) + " pts so far", "to 02:29", "The domain range: 02:00–02:29 ET. The tier is checked at 02:30.", na)
-        cRow(TC, 2, "ATR", na(atrPts) ? "overnight ATR warming up" : "overnight ATR " + str.tostring(math.round(atrPts)) + " pts", "", "Overnight ATR(" + str.tostring(atrLen) + "): average overnight (18:00 → 02:29) true range. Coiled = domain range ÷ this ≤ " + str.tostring(coilMax, "0.00") + ".", na)
+        cHead(TC, "◇" + ttl, ses + nowT, "FORMING", color.gray)
+        cRow(TC, 1, "RANGE", (mob ? "" : "forming · ") + str.tostring(math.round(fH - fL)) + " pts" + (mob ? "" : " so far"), "to 02:29", "The domain range: 02:00–02:29 ET. The tier is checked at 02:30.", na)
+        if not mob
+            cRow(TC, 2, "ATR", na(atrPts) ? "overnight ATR warming up" : "overnight ATR " + str.tostring(math.round(atrPts)) + " pts", "", "Overnight ATR(" + str.tostring(atrLen) + "): average overnight (18:00 → 02:29) true range. Coiled = domain range ÷ this ≤ " + str.tostring(coilMax, "0.00") + ".", na)
     else if live
         float lHs  = math.max(dH, lonHi)
         float lLs  = math.min(dL, lonLo)
@@ -709,34 +931,48 @@ if barstate.islast and showCard
         float dLo  = (close - lLs) / rD
         float pHi  = defOn ? tblAt(coiled ? INC : INO, 5, pos, bH(dHi)) : na
         float pLo  = defOn ? tblAt(coiled ? INC : INO, 5, pos, bH(dLo)) : na
-        cHead(TC, (tier == 3 ? "◆◆" : tier >= 1 ? "◆" : "◇") + " DOMAIN EXPANSION", "LONDON · " + nowT, tierNm(tier), qCol)
+        cHead(TC, (tier == 3 ? "◆◆" : tier >= 1 ? "◆" : "◇") + ttl, ses + nowT, tierNm(tier), qCol)
         string cTx = na(coil) ? "coil n/a" : "coil " + str.tostring(coil, "0.00") + (qualC ? " ✓" : " ✗")
         string bTx = na(cbPts) ? "CBDR n/a" : "CBDR " + str.tostring(cbPts / rD, "0.0") + "×" + (cbOK ? " ✓" : " ✗")
-        cRow(TC, 1, "RANGE", str.tostring(math.round(rD)) + " pts · " + cTx, bTx, "Domain range 02:00–02:29 ET and the two factors checked at 02:30: coiled = range ÷ overnight ATR(" + str.tostring(atrLen) + ") ≤ " + str.tostring(coilMax, "0.00") + "; CBDR wide = the 14:00–20:00 range ≥ " + str.tostring(cbMult, "0.0") + " domain ranges. 2 SD at the London extreme, NQ + ES + RTY 2018–26: both 63% · coiled only 47% · CBDR only 39% · neither 19% (2025–26: 61 · 39 · 38 · 17).", na)
-        cRow(TC, 2, "EXPECT", na(lrE) ? "London range —" : "London ≈ " + str.tostring(math.round(lrE)) + " pts", na(lrE) ? "" : str.tostring(math.round(lrE * 0.778)) + "–" + str.tostring(math.round(lrE * 1.293)), "Expected London range (02:00–04:59), from the domain range and the overnight ATR: 1.79 × range^0.50 × ATR^0.44 points, fitted on NQ + ES + RTY 2018–24. Middle half shown right. Checked on 2025–26: 48% of sessions landed in the middle half, R² 0.87; 2025–26 ranges ran about 6% under the estimate.", na)
-        float lrNow = lHs - lLs
-        cRow(TC, 3, "DONE", gauge(na(lrE) ? 0.0 : lrNow / lrE) + " " + str.tostring(math.round(lrNow)) + " pts", na(lrE) ? "" : pctI(100 * lrNow / lrE), "London range so far (02:00 → now) against the expected range. Past 100%, London has already done a typical session's work.", na)
-        cRow(TC, 4, "SD", "▲ " + str.tostring(upS, "0.0") + " · ▼ " + str.tostring(dnS, "0.0"), "furthest", "The furthest price has gone past the domain range since 02:30, in domain ranges (SD), above and below.", na)
-        cRow(TC, 5, "2 SD", expHit ? "✓ " + (modeSD ? sdTxtOf(expSD) : pctTxt(expPctE)) + " reached " + hhmm(expT) : "by 04:59", expHit ? "" : pctI(p2), "How often London went on to reach 2 SD past the domain range by 04:59, from this time and the furthest SD so far" + (coiled ? " (coiled days)" : " (days not coiled)") + ". At 02:30 it is the tier's rate. NQ + ES + RTY 2018–26, read between 15-minute checkpoints." + (oddsOk ? "" : " Shown only at the default settings."), expHit ? qCol : na)
-        cRow(TC, 6, "HIGH", "London high " + str.tostring(dHi, "0.0") + " SD away", "in " + pctI(pHi), "How often the London high (02:00–04:59) was already in at this time, with price this far below it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
-        cRow(TC, 7, "LOW", "London low " + str.tostring(dLo, "0.0") + " SD away", "in " + pctI(pLo), "How often the London low (02:00–04:59) was already in at this time, with price this far above it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
+        string rngTip = "Domain range 02:00–02:29 ET and the two factors checked at 02:30: coiled = range ÷ overnight ATR(" + str.tostring(atrLen) + ") ≤ " + str.tostring(coilMax, "0.00") + "; CBDR wide = the 14:00–20:00 range ≥ " + str.tostring(cbMult, "0.0") + " domain ranges. 2 SD at the London extreme, NQ + ES + RTY 2018–26: both 63% · coiled only 47% · CBDR only 39% · neither 19% (2025–26: 61 · 39 · 38 · 17)."
+        string p2Tip = "How often London went on to reach 2 SD past the domain range by 04:59, from this time and the furthest SD so far" + (coiled ? " (coiled days)" : " (days not coiled)") + ". At 02:30 it is the tier's rate. NQ + ES + RTY 2018–26, read between 15-minute checkpoints." + (oddsOk ? "" : " Shown only at the default settings.")
+        if mob
+            cRow(TC, 1, "RANGE", str.tostring(math.round(rD)) + " pts", (qualC ? "coil ✓" : "coil ✗") + (cbOK ? " CB ✓" : " CB ✗"), rngTip, na)
+            cRow(TC, 2, "2 SD", expHit ? "✓ " + hhmm(expT) : "▲ " + str.tostring(upS, "0.0") + " ▼ " + str.tostring(dnS, "0.0"), expHit ? "" : pctI(p2), p2Tip + " The value shows the furthest SD so far above (▲) and below (▼).", expHit ? qCol : na)
+            cRow(TC, 3, "HI / LO", "in " + pctI(pHi) + " · " + pctI(pLo), "", "How often the London high and low were already in at this time, with price this far from them. NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
+        else
+            cRow(TC, 1, "RANGE", str.tostring(math.round(rD)) + " pts · " + cTx, bTx, rngTip, na)
+            cRow(TC, 2, "EXPECT", na(lrE) ? "London range —" : "London ≈ " + str.tostring(math.round(lrE)) + " pts", na(lrE) ? "" : str.tostring(math.round(lrE * 0.778)) + "–" + str.tostring(math.round(lrE * 1.293)), "Expected London range (02:00–04:59), from the domain range and the overnight ATR: 1.79 × range^0.50 × ATR^0.44 points, fitted on NQ + ES + RTY 2018–24. Middle half shown right. Checked on 2025–26: 48% of sessions landed in the middle half, R² 0.87; 2025–26 ranges ran about 6% under the estimate.", na)
+            float lrNow = lHs - lLs
+            cRow(TC, 3, "DONE", gauge(na(lrE) ? 0.0 : lrNow / lrE) + " " + str.tostring(math.round(lrNow)) + " pts", na(lrE) ? "" : pctI(100 * lrNow / lrE), "London range so far (02:00 → now) against the expected range. Past 100%, London has already done a typical session's work.", na)
+            cRow(TC, 4, "SD", "▲ " + str.tostring(upS, "0.0") + " · ▼ " + str.tostring(dnS, "0.0"), "furthest", "The furthest price has gone past the domain range since 02:30, in domain ranges (SD), above and below.", na)
+            cRow(TC, 5, "2 SD", expHit ? "✓ " + (modeSD ? sdTxtOf(expSD) : pctTxt(expPctE)) + " reached " + hhmm(expT) : "by 04:59", expHit ? "" : pctI(p2), p2Tip, expHit ? qCol : na)
+            cRow(TC, 6, "HIGH", "London high " + str.tostring(dHi, "0.0") + " SD away", "in " + pctI(pHi), "How often the London high (02:00–04:59) was already in at this time, with price this far below it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
+            cRow(TC, 7, "LOW", "London low " + str.tostring(dLo, "0.0") + " SD away", "in " + pctI(pLo), "How often the London low (02:00–04:59) was already in at this time, with price this far above it (in domain ranges). NQ + ES + RTY 2018–26." + (coiled ? " Coiled days." : " Days not coiled."), na)
     else if done
         float lr = lH5 - lL5
-        cHead(TC, (resV != 0 ? "✓" : "✗") + " DOMAIN EXPANSION", "LONDON DONE · " + nowT, tierNm(tier), qCol)
-        cRow(TC, 1, "RESULT", resV == 1 ? "▲ expansion" : resV == -1 ? "▼ expansion" : "no expansion", (resSD >= 0 ? "▲ " : "▼ ") + str.tostring(math.abs(resSD), "0.0") + " SD", "The result at 05:00 by the measure in settings, and the furthest SD past the domain range.", resV != 0 ? qCol : na)
-        cRow(TC, 2, "RANGE", "London " + str.tostring(math.round(lr)) + " pts", na(adrD) or adrD <= 0 ? "" : str.tostring(lr / adrD, "0.00") + " ADR", "London range 02:00–04:59 against ADR20 of the trading day (daily bars). NQ + ES + RTY 2018–26: median 0.24, middle half 0.18–0.34.", na)
-        string ftE = str.substring(ftSess, 5, 7) + ":" + str.substring(ftSess, 7, 9)
-        cRow(TC, 3, "FOLLOW", na(ftRes) ? "close at " + ftE + " ET" : ftRes, na(ftRes) ? "pending" : ftE, "Follow-through: the close at the end of its window (" + ftSess + " ET) against the domain range, in SD. Some expansions finish after London.", na)
-        cRow(TC, 4, "NY HIGH", str.tostring(lH5, format.mintick), na(nyHt) ? (mNow < 660 ? "open · 75%" : "not taken") : "taken " + hhmm(nyHt), "The London high, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 75% of sessions (NY AM 09:30–10:59: 66%).", na(nyHt) ? na : qCol)
-        cRow(TC, 5, "NY LOW", str.tostring(lL5, format.mintick), na(nyLt) ? (mNow < 660 ? "open · 71%" : "not taken") : "taken " + hhmm(nyLt), "The London low, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 71% of sessions (NY AM 09:30–10:59: 62%).", na(nyLt) ? na : qCol)
+        cHead(TC, (resV != 0 ? "✓" : "✗") + ttl, (mob ? "LDN " : "LONDON DONE · ") + nowT, tierNm(tier), qCol)
+        string resTx = resV == 1 ? "▲ expansion" : resV == -1 ? "▼ expansion" : "no expansion"
+        string sdR   = (resSD >= 0 ? "▲ " : "▼ ") + str.tostring(math.abs(resSD), "0.0") + " SD"
+        string hTip  = "The London high, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 75% of sessions (NY AM 09:30–10:59: 66%)."
+        string lTip  = "The London low, carried to 11:00. NQ + ES + RTY 2018–26: taken by 11:00 on 71% of sessions (NY AM 09:30–10:59: 62%)."
+        cRow(TC, 1, "RESULT", resTx, sdR, "The result at 05:00 by the measure in settings, and the furthest SD past the domain range.", resV != 0 ? qCol : na)
+        if mob
+            cRow(TC, 2, "NY H / L", (na(nyHt) ? (mNow < 660 ? "H open" : "H no") : "H " + hhmm(nyHt)) + " · " + (na(nyLt) ? (mNow < 660 ? "L open" : "L no") : "L " + hhmm(nyLt)), mNow < 660 ? "75 · 71%" : "", "The London high and low carried to 11:00: when New York took them, or open. " + hTip + " " + lTip, na(nyHt) and na(nyLt) ? na : qCol)
+        else
+            cRow(TC, 2, "RANGE", "London " + str.tostring(math.round(lr)) + " pts", na(adrD) or adrD <= 0 ? "" : str.tostring(lr / adrD, "0.00") + " ADR", "London range 02:00–04:59 against ADR20 of the trading day (daily bars). NQ + ES + RTY 2018–26: median 0.24, middle half 0.18–0.34.", na)
+            string ftE = str.substring(ftSess, 5, 7) + ":" + str.substring(ftSess, 7, 9)
+            cRow(TC, 3, "FOLLOW", na(ftRes) ? "close at " + ftE + " ET" : ftRes, na(ftRes) ? "pending" : ftE, "Follow-through: the close at the end of its window (" + ftSess + " ET) against the domain range, in SD. Some expansions finish after London.", na)
+            cRow(TC, 4, "NY HIGH", str.tostring(lH5, format.mintick), na(nyHt) ? (mNow < 660 ? "open · 75%" : "not taken") : "taken " + hhmm(nyHt), hTip, na(nyHt) ? na : qCol)
+            cRow(TC, 5, "NY LOW", str.tostring(lL5, format.mintick), na(nyLt) ? (mNow < 660 ? "open · 71%" : "not taken") : "taken " + hhmm(nyLt), lTip, na(nyLt) ? na : qCol)
     else
-        cHead(TC, "◇ DOMAIN EXPANSION", "LONDON · " + nowT, "NEXT", color.gray)
-        cRow(TC, 1, "NEXT", "domain range 02:00–02:29 ET", "", "The card goes live at 02:30, when the tier is checked.", na)
+        cHead(TC, "◇" + ttl, ses + nowT, "NEXT", color.gray)
+        cRow(TC, 1, "NEXT", mob ? "domain 02:00" : "domain range 02:00–02:29 ET", "", "The card goes live at 02:30, when the tier is checked.", na)
         int nh = hK.size()
         if nh > 0
             int  lr0 = hR.get(nh - 1)
-            cRow(TC, 2, "LAST", str.format_time(hK.get(nh - 1), "EEE dd", tz) + " · " + tierNm(hT.get(nh - 1)), (lr0 == 1 ? "▲ ✓ " : lr0 == -1 ? "▼ ✓ " : "✗ ") + str.tostring(math.round(hP.get(nh - 1))) + " pts", "The last London session: tier, result and range.", na)
-if barstate.islast and showHist and hK.size() > 0
+            cRow(TC, 2, "LAST", str.format_time(hK.get(nh - 1), "EEE dd", tz) + (mob ? "" : " · " + tierNm(hT.get(nh - 1))), (lr0 == 1 ? "▲ ✓ " : lr0 == -1 ? "▼ ✓ " : "✗ ") + str.tostring(math.round(hP.get(nh - 1))) + " pts", "The last London session: tier, result and range.", na)
+if barstate.islast and showHist and not mob and hK.size() > 0
     int nh = hK.size()
     int nr = math.min(histN, nh)
     if na(TH)
@@ -764,3 +1000,137 @@ if barstate.islast and showHist and hK.size() > 0
         TH.cell(3, r, (sv >= 0 ? "▲ " : "▼ ") + str.tostring(math.abs(sv), "0.0") + " SD", text_color = cTxt, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
         TH.cell(4, r, str.tostring(math.round(hP.get(i))) + " pts", text_color = cTxt, bgcolor = cBody, text_size = cSz, text_halign = text.align_right, text_font_family = font.family_monospace)
         r += 1
+
+// ═══════════════════════════════════════════════════════════════════
+// HOLLOW PURPLE CARD (13:30 → 17:00 ET): a PLAN row on top says what to watch now
+// ═══════════════════════════════════════════════════════════════════
+var table TP = na
+cRowB(table t, int r, string k, string v, string w, string tip, color bg) =>
+    t.cell(0, r, k, text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = bg, text_font_family = font.family_monospace, tooltip = tip)
+    t.cell(1, r, v, text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = bg, text_font_family = font.family_monospace, tooltip = tip)
+    t.cell(2, r, w, text_color = cTxt, text_size = cSz, text_halign = text.align_right, bgcolor = bg, text_font_family = font.family_monospace, tooltip = tip)
+ptsOf(float v) => str.tostring(v, format.mintick) + " pts"
+pxOf(float v) => str.tostring(v, format.mintick)
+string planTip = "What to watch now. 13:30–13:59: the PM range forms. Until the first break: the side the 14:00 read favours, its edge and how far. After the break: the next level on that side not yet reached (−0.5 ARP, then 1, 1.5, 2 SD), its distance and the live odds it trades by 16:14. 15:40–15:49: the MOC macro is next. From 15:50: the final-hour side the MOC is likely to take first, then that side's ARP. After 16:14: the day's summary. Odds are NQ + ES + RTY 2018–26 frequencies, not signals."
+if barstate.islast and showHP and showHPc
+    if na(TP)
+        TP := table.new(posOf(hpCPos), 3, 14, border_width = 0, frame_width = 1, frame_color = color.new(hpCol, 30))
+    TP.clear(0, 0, 2, 13)
+    int   mN    = hour(time, tz) * 60 + minute(time, tz)
+    bool  today = hpDay == dayCount
+    float mins  = today and not na(hpT0) ? (math.max(timenow, time) - hpT0) / 60000.0 : na
+    string nowT = hhmm(time) + (mob ? "" : " ET")
+    string ttl  = mob ? " PURPLE" : " HOLLOW PURPLE"
+    string ses  = mob ? "" : "NY PM · "
+    color  hl   = mixC(hpCol, cBody, isDark ? 0.30 : 0.18)     // the PLAN row: opaque, tinted
+    if inHPr
+        cHead(TP, "◇" + ttl, ses + nowT, mob ? "FORM" : "FORMING", color.gray)
+        cRowB(TP, 1, "PLAN", mob ? "read at 14:00" : "PM range forming · read at 14:00", "", planTip, hl)
+        cRow(TP, 2, "RANGE", str.tostring(hpH - hpL, format.mintick) + " pts so far", "to 13:59", "The PM range: 13:30–13:59 ET. It is read at 14:00.", na)
+    else if today and mN >= 840 and mN < 1080
+        bool  done  = mN >= 975
+        bool  fhSet = showFH and hpFine and fhDay == dayCount
+        int   sd    = hpBrk != 0 ? hpBrk : (hpUp >= 50 ? 1 : -1)
+        string ar   = sd == 1 ? "▲" : "▼"
+        // the next level on the break side (before a break, the favoured side) not yet reached
+        int jN = -1
+        for j = 0 to 3
+            if jN < 0 and na(sd == 1 ? hpTU.get(j) : hpTD.get(j))
+                jN := j
+        float  yN = jN < 0 ? na : (sd == 1 ? hpH + HPK.get(jN) * hpR : hpL - HPK.get(jN) * hpR)
+        string nN = jN < 0 ? "" : (sd == 1 ? "+" : "−") + (jN == 0 ? "0.5 ARP" : str.tostring(HPK.get(jN), "0.#") + " SD")
+        float  pN = na(yN) or not hpDef or na(hpAtr) or hpAtr <= 0 ? na : pPM(mins, math.abs(yN - close) / hpAtr)
+        // PLAN: one line, desktop and mobile wording
+        string plan  = ""
+        string planM = ""
+        string planR = ""
+        if done
+            string res = hpBrk == 0 ? "no break" : ar + " break " + (na(hpOthT) ? "held" : "then both sides") + (jN != 0 ? " · ARP ✓" : " · ARP missed")
+            plan  := "Done · " + res
+            planM := hpBrk == 0 ? "no break" : ar + (na(hpOthT) ? " held" : " both") + (jN != 0 ? " · ARP ✓" : " · no ARP")
+        else if fhSet and mN >= 950
+            bool hiT = not na(mocHt)
+            bool loT = not na(mocLt)
+            if not hiT and not loT
+                int ms = fhUp >= 50 ? 1 : -1
+                plan  := "MOC: " + (ms == 1 ? "▲ final-hour high " + pxOf(fhH) : "▼ final-hour low " + pxOf(fhL)) + " first · " + ptsOf(math.abs((ms == 1 ? fhH : fhL) - close))
+                planM := "MOC " + (ms == 1 ? "▲ " + pxOf(fhH) : "▼ " + pxOf(fhL))
+                planR := pctI(ms == 1 ? fhUp : 100 - fhUp)
+            else
+                int   tk = hiT and loT ? (mocHt <= mocLt ? -1 : 1) : hiT ? 1 : -1
+                float yA = tk == 1 ? fhH + 0.5 * fhR : fhL - 0.5 * fhR
+                int   tA = tk == 1 ? arpUt : arpDt
+                if na(tA)
+                    float pA = not hpDef or na(hpAtr) or hpAtr <= 0 ? na : pPM(mins, math.abs(yA - close) / hpAtr)
+                    plan  := "MOC took the " + (tk == 1 ? "high → ▲ ARP " : "low → ▼ ARP ") + pxOf(yA) + " · " + ptsOf(math.abs(yA - close))
+                    planM := (tk == 1 ? "▲ ARP " : "▼ ARP ") + pxOf(yA)
+                    planR := pctI(pA)
+                else
+                    plan  := "MOC " + (tk == 1 ? "▲" : "▼") + " ARP ✓ " + hhmm(tA) + " · no tested edge left"
+                    planM := (tk == 1 ? "▲" : "▼") + " ARP ✓ " + hhmm(tA)
+        else if showFH and hpFine and mN >= 940 and mN < 950
+            plan  := "MOC macro at 15:50 · takes a final-hour side 72%"
+            planM := "MOC 15:50"
+            planR := mob ? "72%" : ""
+        else if hpBrk == 0
+            float yE = sd == 1 ? hpH : hpL
+            plan  := "Wait for the break · " + (sd == 1 ? "▲ PM high " : "▼ PM low ") + pxOf(yE) + " · " + ptsOf(math.abs(yE - close))
+            planM := "wait " + (sd == 1 ? "▲ " : "▼ ") + pxOf(yE)
+            planR := (sd == 1 ? "▲ " : "▼ ") + pctI(sd == 1 ? hpUp : 100 - hpUp)
+        else if jN >= 0
+            plan  := ar + " next " + nN + " " + pxOf(yN) + " · " + ptsOf(math.abs(yN - close))
+            planM := ar + " " + (jN == 0 ? "ARP" : str.tostring(HPK.get(jN), "0.#") + " SD") + " " + pxOf(yN)
+            planR := pctI(pN) + (mob ? "" : " by 16:14")
+        else
+            plan  := ar + " every level reached · 2 SD ✓"
+            planM := ar + " all ✓"
+        string pill = done ? "DONE" : inMOC ? "MOC" : hpBrk == 1 ? (mob ? "▲" : "▲ BREAK") : hpBrk == -1 ? (mob ? "▼" : "▼ BREAK") : "WAIT"
+        cHead(TP, "◆" + ttl, ses + nowT, pill, hpCol)
+        cRowB(TP, 1, "PLAN", mob ? planM : plan, planR, planTip, hl)
+        string rd  = hpUp >= 50 ? "▲ first " + pctI(hpUp) : "▼ first " + pctI(100 - hpUp)
+        string rdT = "Where the 13:59 close sat in the PM range (0 = low, 1 = high), and how often the first break after 14:00 went that way. By octant, % up first: 12 · 19 · 29 · 44 · 55 · 67 · 79 · 89. Steady in 2018–24 and 2025–26 and on each symbol." + (hpDef ? "" : " Shown only at 13:30–14:00.")
+        string bV  = na(hpBrkT) ? "not broken yet" : (hpBrk == 1 ? "▲ " : "▼ ") + "broke " + hhmm(hpBrkT)
+        string bW  = na(hpBrkT) ? "" : na(hpOthT) ? "held" : "both · " + hhmm(hpOthT)
+        string bT  = "The first break of the PM range after 14:00. Held = the other side not taken since; that was the case at 16:14 on 52% of sessions."
+        if mob
+            cRow(TP, 2, "READ", "13:59 at " + str.tostring(hpPos, "0.00"), hpDef ? (hpUp >= 50 ? "▲ " + pctI(hpUp) : "▼ " + pctI(100 - hpUp)) : "—", rdT, na)
+            cRow(TP, 3, "BREAK", na(hpBrkT) ? "—" : (hpBrk == 1 ? "▲ " : "▼ ") + hhmm(hpBrkT), na(hpBrkT) ? "" : na(hpOthT) ? "held" : "both", bT, na(hpBrkT) ? na : hpCol)
+            if fhSet
+                string mV = not na(mocHt) and not na(mocLt) ? "both" : not na(mocHt) ? "▲ " + hhmm(mocHt) : not na(mocLt) ? "▼ " + hhmm(mocLt) : "—"
+                cRow(TP, 4, "MOC", mV, na(arpUt) and na(arpDt) ? "" : "ARP ✓", "The MOC macro (15:50–16:14): which final-hour side it took, and which ARP it reached.", na(mocHt) and na(mocLt) ? na : hpCol)
+        else
+            string aTx = na(adrD) or adrD <= 0 ? "" : " · " + str.tostring(hpR / adrD, "0.00") + " ADR"
+            cRow(TP, 2, "RANGE", str.tostring(hpR, format.mintick) + " pts" + aTx, "13:30–13:59", "The PM range, 13:30–13:59 ET, against ADR20 (median 0.14, middle half 0.10–0.20, NQ + ES + RTY 2018–26). Broken by 16:14 on 99.5% of sessions.", na)
+            cRow(TP, 3, "READ", "13:59 close at " + str.tostring(hpPos, "0.00"), hpDef ? rd : "—", rdT, na)
+            cRow(TP, 4, "BREAK", bV, bW, bT, na(hpBrkT) ? na : hpCol)
+            int r = 5
+            for j = 0 to 3
+                float k  = HPK.get(j)
+                float y  = sd == 1 ? hpH + k * hpR : hpL - k * hpR
+                int   t  = sd == 1 ? hpTU.get(j) : hpTD.get(j)
+                float pLv = na(t) and hpDef and not na(hpAtr) and hpAtr > 0 ? pPM(mins, math.abs(y - close) / hpAtr) : na
+                string kn = (sd == 1 ? "+" : "−") + (j == 0 ? "0.5 ARP" : str.tostring(k, "0.#") + " SD")
+                cRow(TP, r, kn, pxOf(y) + (na(t) and not done ? " · " + ptsOf(math.abs(y - close)) : ""), not na(t) ? "✓ " + hhmm(t) : na(pLv) ? (done ? "not reached" : "—") : pctI(pLv), kn + " " + pxOf(y) + (hpBrk == 0 ? " (the side the 14:00 read favours; no break yet)" : " (the side that broke first)") + ". Reached by 16:14 on " + str.tostring(HPB.get(j), "0") + "% of sessions on the first-break side. Live odds by 16:14: from its distance to price in ATR15 and the time left, read between checkpoints (after 16:00 the distance is scaled by the time left).", not na(t) ? hpCol : na)
+                r += 1
+            if showFH and hpFine and mN >= 900
+                if inFH
+                    cRow(TP, r, "FINAL HR", "forming · " + str.tostring(fhH - fhL, format.mintick) + " pts", "set 15:50", "The final-hour range, 15:00–15:49 ET, set at 15:50 for the MOC macro.", na)
+                    r += 1
+                else if fhSet
+                    string fr = fhUp >= 50 ? "▲ first " + pctI(fhUp) : "▼ first " + pctI(100 - fhUp)
+                    cRow(TP, r, "FINAL HR", str.tostring(fhR, format.mintick) + " pts · 15:50 at " + str.tostring(fhPos, "0.00"), fr, "The final-hour range (15:00–15:49) and where 15:50 opened in it (0 = low, 1 = high). The MOC took the side nearer price first: a logistic in that position, Brier 0.250 → 0.146 on 2025–26. It took one side by 15:59 on 72% of sessions, by 16:14 on 80%.", na)
+                    r += 1
+                    string mV = not na(mocHt) and not na(mocLt) ? "both taken" : not na(mocHt) ? "▲ high taken " + hhmm(mocHt) : not na(mocLt) ? "▼ low taken " + hhmm(mocLt) : "neither yet"
+                    cRow(TP, r, "MOC", mV, "15:50–16:00", "The market-on-close macro: 15:50–15:59 ET, carrying to 16:14. It took the final-hour high on 37% of sessions, the low on 37%, both on 3%.", na(mocHt) and na(mocLt) ? na : hpCol)
+                    r += 1
+                    float yU = fhH + 0.5 * fhR
+                    float yD = fhL - 0.5 * fhR
+                    float pU = na(arpUt) and hpDef and not na(hpAtr) and hpAtr > 0 ? pPM(mins, math.abs(yU - close) / hpAtr) : na
+                    float pD = na(arpDt) and hpDef and not na(hpAtr) and hpAtr > 0 ? pPM(mins, math.abs(yD - close) / hpAtr) : na
+                    string wU = not na(arpUt) ? "▲ ✓ " + hhmm(arpUt) : "▲ " + (na(pU) ? "—" : pctI(pU))
+                    string wD = not na(arpDt) ? "▼ ✓ " + hhmm(arpDt) : "▼ " + (na(pD) ? "—" : pctI(pD))
+                    cRow(TP, r, "ARP", "▲ " + pxOf(yU) + " · ▼ " + pxOf(yD), wU + " · " + wD, "The final-hour range's −0.5 ARP, half its range beyond the high (▲) and the low (▼), with ✓ or the live odds by 16:14. Reached in the MOC macro on 16% of sessions (either side), 27% by 16:14, 31% of the runs that took that side. Runs did not stop at it more than at −0.375 or −0.625: a map, not a turning point.", not na(arpUt) or not na(arpDt) ? hpCol : na)
+                    r += 1
+    else
+        cHead(TP, "◇" + ttl, ses + nowT, "NEXT", color.gray)
+        cRowB(TP, 1, "PLAN", mob ? "range 13:30" : "PM range 13:30–13:59 ET · read at 14:00", "", planTip, hl)
